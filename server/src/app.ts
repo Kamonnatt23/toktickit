@@ -20,7 +20,6 @@ app.use(express.json());
 app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({ status: "ok", service: "TokTickIT API" });
 });
-
 // ---------------------------------------------------------------------------
 // Issue 4 — Category list
 // GET /api/categories
