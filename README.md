@@ -6,7 +6,7 @@ the backend. The project layout follows the lab requirements.
 
 Quick setup
  - Install root tools (npm/node) if missing.
- - From the workspace root, install dependencies for both sides and configure env files:
+ - From the project root, install dependencies for both sides and configure env files:
 
 ```bash
 # Client
