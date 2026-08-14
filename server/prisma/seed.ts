@@ -1,12 +1,8 @@
-import { getPrisma } from "../src/prisma.js";
+import { PrismaClient } from '@prisma/client';
 
-// Issue 3 — seed the four supported categories.
-// The four names are: Account and Access, Hardware, Software, Network.
-// Requirement: running the seed twice must NOT create duplicates.
-// Hint: prisma.category.upsert({ where:{name}, update:{}, create:{name} }).
+const prisma = new PrismaClient();
+
 async function main() {
-  const prisma = getPrisma();
-  void prisma;
   const names = [
     "Account and Access",
     "Hardware",
@@ -17,12 +13,10 @@ async function main() {
   for (const name of names) {
     await prisma.category.upsert({
       where: { name },
-      update: {},
+      update: {}, // ไม่ต้องอัปเดตอะไรถ้ามีข้อมูลอยู่แล้ว (idempotency)
       create: { name },
     });
   }
-
-  console.log(`Seeded ${names.length} categories (idempotent).`);
 }
 
 main()
@@ -31,5 +25,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await getPrisma().$disconnect();
+    await prisma.$disconnect();
   });
