@@ -31,11 +31,14 @@ export function SystemStatus() {
           <div className="alert alert-success">
             <strong>System Status: Online</strong>
             {categories.length > 0 && (
-              <ul className="mt-2 mb-0">
-                {categories.map((c) => (
-                  <li key={c.id}>{c.name}</li>
-                ))}
-              </ul>
+              <div className="mt-3">
+                <p className="mb-1">Supported Request Categories:</p>
+                <ul className="mb-0">
+                  {categories.map((c) => (
+                    <li key={c.id}>{c.name}</li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         )}
