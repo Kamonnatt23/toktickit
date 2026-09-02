@@ -17,6 +17,9 @@ The testing strategy for Lab 2 employs a layered approach to ensure robust ticke
 | T-08 | UI | AC-08 | My tickets search and filter interactions | Table filters data locally or calls API correctly based on search input. | `client/tests/lab-02/MyTicketsList.test.tsx` | Pending |
 | T-09 | E2E | AC-09 | Navigation from My Tickets to Detail | Clicking a table row successfully routes the user to `/tickets/:id`. | `client/tests/e2e/lab-02/ticket-flow.spec.ts` | Pending |
 | T-10 | E2E | AC-10 | View ticket detail read-only data & files | Page displays all ticket fields correctly and lists active attachments without edit inputs. | `client/tests/e2e/lab-02/ticket-detail.spec.ts` | Pending |
+| T-11 | API | AC-07 | Security: Deny access to other user's ticket | Returns 403 Forbidden when requesting a ticket not owned by Requester | `server/tests/lab-02/tickets-security.api.test.ts` | Pending |
+| T-12 | API | AC-08 | My Tickets API pagination, sorting, filtering | Returns correctly sorted and filtered subset of records | `server/tests/lab-02/tickets-list.api.test.ts` | Pending |
+| T-13 | UI | AC-08 | My Tickets UI pagination and sort controls | UI correctly interacts with API and updates data view | `client/tests/lab-02/MyTicketsList.test.tsx` | Pending |
 
 ## 3. Acceptance-Criterion Traceability
 
@@ -28,8 +31,8 @@ The testing strategy for Lab 2 employs a layered approach to ensure robust ticke
 | **AC-04** (Attachment size limit) | T-04 |
 | **AC-05** (Attachment max limit) | T-05 |
 | **AC-06** (Attachment soft-remove) | T-06 |
-| **AC-07** (My Tickets scoped to user) | T-07 |
-| **AC-08** (My Tickets search/filter) | T-08 |
+| **AC-07** (My Tickets scoped to user) | T-07, T-11 |
+| **AC-08** (My Tickets search/filter) | T-08, T-12, T-13 |
 | **AC-09** (My Tickets navigation) | T-09 |
 | **AC-10** (Detail read-only view) | T-10 |
 
@@ -46,7 +49,7 @@ The testing strategy for Lab 2 employs a layered approach to ensure robust ticke
 
 ## 6. Final Results
 *(To be updated upon completion of sprint implementation and testing phase)*
-*   **Total Tests:** 10
+*   **Total Tests:** 13
 *   **Passed:** 0
 *   **Failed:** 0
 *   **Coverage:** Pending%
