@@ -4,10 +4,22 @@ import { DevProvider, useDevContext } from "./contexts/DevContext.js";
 import { DevRequesterSelection } from "./components/DevRequesterSelection.js";
 import { CreateTicket } from "./components/CreateTicket.js";
 import { MyTickets } from "./components/MyTickets.js";
+import { TicketDetail } from "./components/TicketDetail.js";
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<'create' | 'list'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('create');
+  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
   const { activeUser, setActiveUser } = useDevContext();
+
+  const handleTicketClick = (id: number) => {
+    setSelectedTicketId(id);
+    setActiveTab('detail');
+  };
+
+  const handleBackToList = () => {
+    setSelectedTicketId(null);
+    setActiveTab('list');
+  };
 
   return (
     <>
@@ -33,9 +45,9 @@ function AppContent() {
                   Create Ticket
                 </button>
                 <button 
-                  className={`btn ${activeTab === 'list' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                  style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'list' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'list' ? 'white' : '#006B3C' }}
-                  onClick={() => setActiveTab('list')}
+                  className={`btn ${(activeTab === 'list' || activeTab === 'detail') ? 'btn-success fw-bold' : 'btn-outline-success'}`}
+                  style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: (activeTab === 'list' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'list' || activeTab === 'detail') ? 'white' : '#006B3C' }}
+                  onClick={handleBackToList}
                 >
                   My Tickets
                 </button>
@@ -50,7 +62,9 @@ function AppContent() {
 
       {activeUser && (
         <div className="container position-relative mt-5 pt-4 pb-5" style={{ maxWidth: 800 }}>
-          {activeTab === 'create' ? <CreateTicket /> : <MyTickets />}
+          {activeTab === 'create' && <CreateTicket />}
+          {activeTab === 'list' && <MyTickets onTicketClick={handleTicketClick} />}
+          {activeTab === 'detail' && selectedTicketId && <TicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
         </div>
       )}
     </>

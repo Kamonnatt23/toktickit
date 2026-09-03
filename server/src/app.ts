@@ -204,4 +204,47 @@ app.get("/api/tickets", async (req: Request, res: Response): Promise<any> => {
   }
 });
 
+app.get("/api/tickets/:id", async (req: Request, res: Response): Promise<any> => {
+  try {
+    const requesterIdStr = req.header("X-Requester-Id");
+    if (!requesterIdStr) return res.status(401).json({ error: "Missing X-Requester-Id header" });
+    
+    const requesterId = parseInt(requesterIdStr, 10);
+    if (isNaN(requesterId)) return res.status(401).json({ error: "Invalid X-Requester-Id header" });
+
+    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
+    if (!requester || !requester.isActive) {
+      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
+    }
+    
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: "Invalid ticket ID format" });
+    }
+
+    const ticket = await getPrisma().ticket.findUnique({
+      where: { id: ticketId },
+      include: { category: true, relatedSystem: true }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    // Ownership check (Crucial scope rule)
+    if (ticket.requesterId !== requesterId) {
+      // Returning 404 for security obscurity or 403. Using 404 is generally better for obscurity, 
+      // but standard is 403. Let's return 403 as the prompt says "403 Forbidden (or 404 Not Found)"
+      return res.status(403).json({ error: "Forbidden: You do not have permission to access this ticket" });
+    }
+
+    const ticketNumber = `TKT-${String(ticket.id).padStart(3, '0')}`;
+    return res.status(200).json({ ...ticket, ticketNumber });
+
+  } catch (err) {
+    console.error("Error fetching single ticket:", err);
+    return res.status(500).json({ error: "Failed to fetch ticket" });
+  }
+});
+
 export default app;
