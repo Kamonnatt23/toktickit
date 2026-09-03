@@ -79,8 +79,10 @@ describe('DevContext & Requester Selection (T-01)', () => {
       </DevProvider>
     );
 
-    // Should start in banner mode
-    expect(screen.getByText(/Bob Jones/i)).toBeInTheDocument();
+    // Should show banner after fetch completes
+    await waitFor(() => {
+      expect(screen.getByText(/Bob Jones/i)).toBeInTheDocument();
+    });
     
     // Click change
     const changeBtn = screen.getByText(/Change Requester/i);
@@ -135,13 +137,15 @@ describe('DevContext & Requester Selection (T-01)', () => {
       </DevProvider>
     );
 
-    // Initially might see banner or loading
+    // activeUser should remain null during and after fetch
+    expect(screen.queryByText(/\[TESTING MODE\]/i)).not.toBeInTheDocument();
     
     // Then it fetches list, doesn't find ID 99, and clears localStorage
     await waitFor(() => {
       expect(screen.getByText(/Select Development Context/i)).toBeInTheDocument();
     });
     
+    expect(screen.queryByText(/\[TESTING MODE\]/i)).not.toBeInTheDocument();
     expect(localStorage.getItem('dev_requester_user')).toBeNull();
   });
 });

@@ -29,7 +29,6 @@ export function DevProvider({ children }: { children: ReactNode }) {
     if (saved) {
       try {
         initialUser = JSON.parse(saved);
-        setActiveUser(initialUser);
       } catch (e) {
         console.error("Failed to parse saved user", e);
       }
@@ -46,9 +45,12 @@ export function DevProvider({ children }: { children: ReactNode }) {
       .then((data: User[]) => {
         setUsers(data);
         setLoading(false);
-        if (initialUser && !data.some(u => u.id === initialUser!.id)) {
-          setActiveUser(null);
-          localStorage.removeItem('dev_requester_user');
+        if (initialUser) {
+          if (data.some(u => u.id === initialUser!.id)) {
+            setActiveUser(initialUser);
+          } else {
+            localStorage.removeItem('dev_requester_user');
+          }
         }
       })
       .catch(err => {
