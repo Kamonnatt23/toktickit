@@ -41,6 +41,7 @@ describe("Ticket APIs (Issue 3)", () => {
     expect(res.body).toHaveProperty("id");
     expect(res.body.summary).toBe("Test issue"); // tests trimming
     expect(res.body.requesterId).toBe(requesterId);
+    expect(res.body.status).toBe("New");
     expect(res.body.ticketNumber).toMatch(/^TKT-\d{3,}$/);
   });
 
