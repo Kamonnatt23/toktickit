@@ -14,3 +14,5 @@ server/prisma/*.db
 .DS_Store
 server/uploads/
 
+playwright-report/
+test-results/

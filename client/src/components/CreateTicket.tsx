@@ -230,7 +230,21 @@ export function CreateTicket() {
             {errors.description && <div className="invalid-feedback ms-3">{errors.description}</div>}
           </div>
 
-          <div className="d-flex justify-content-center">
+          <div className="d-flex justify-content-center gap-3">
+            <button 
+              type="button" 
+              className="btn btn-outline-secondary px-4 py-3 fw-bold"
+              style={{ borderRadius: '50rem', minWidth: '150px' }}
+              onClick={() => setForm({
+                categoryId: '',
+                relatedSystemId: '',
+                summary: '',
+                priority: 'Medium',
+                description: ''
+              })}
+            >
+              Cancel
+            </button>
             <button 
               type="submit" 
               className="btn btn-success px-5 py-3 fw-bold"
@@ -243,7 +257,7 @@ export function CreateTicket() {
                   Submitting...
                 </>
               ) : (
-                'Submit Request'
+                'Submit Ticket'
               )}
             </button>
           </div>
