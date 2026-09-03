@@ -21,6 +21,24 @@ describe("App", () => {
     });
   });
 
+  it("renders navigation buttons exactly once to prevent duplication", async () => {
+    render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
+    
+    // Assert exactly ONE of each navigation button is in the DOM
+    const checkSystemBtns = screen.getAllByRole("button", { name: /Check System/i });
+    expect(checkSystemBtns).toHaveLength(1);
+
+    const createTicketBtns = screen.getAllByRole("button", { name: /^Create Ticket$/i });
+    expect(createTicketBtns).toHaveLength(1);
+
+    const myTicketsBtns = screen.getAllByRole("button", { name: /^My Tickets$/i });
+    expect(myTicketsBtns).toHaveLength(1);
+  });
+
   it("shows Online and the seeded categories on success", async () => {
     vi.spyOn(api, "checkSystem").mockResolvedValue({
       online: true,
