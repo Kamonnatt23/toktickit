@@ -8,8 +8,8 @@ export default function App() {
     <DevProvider>
       <DevRequesterSelection />
       <div className="container py-5" style={{ maxWidth: 800 }}>
-        <h1 className="h3 mb-4">
-          TokTickIT <span className="text-success">IT Service Desk</span>
+        <h1 className="display-4 fw-bolder text-center mb-5 mt-3" style={{ color: '#212529', letterSpacing: '-0.02em' }}>
+          TokTickIT <span style={{ color: '#006B3C' }}>IT Service Desk</span>
         </h1>
         <SystemStatus />
         <CreateTicket />
