@@ -60,8 +60,10 @@ test.describe('Main Requester Flow', () => {
     
     await expect(page.locator('text=test.pdf')).toBeVisible();
     
-    // Download is trickier to test in E2E directly via Blob, but we can check if button exists
-    await expect(page.locator('button:has-text("Download")')).toBeVisible();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: /download/i }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('test.pdf');
     
     // Soft-remove
     page.on('dialog', dialog => dialog.accept('Test removal reason'));
