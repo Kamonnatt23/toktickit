@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { getPrisma } from "./prisma.js";
+import attachmentsRouter from "./attachments.js";
 // getPrisma() is your lazy database handle. Call it INSIDE a route when you
 // need the DB (Issue 4). It is intentionally unused until then.
 void getPrisma;
@@ -11,6 +12,8 @@ export const app = express();
 
 app.use(cors());          // already wired: lets the Vite dev server call this API
 app.use(express.json());
+
+app.use("/api/attachments", attachmentsRouter);
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("TokTickIT API is running! Access /api/health to check status.");
@@ -83,7 +86,7 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
       return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
     }
 
-    const { categoryId, relatedSystemId, summary, priority, description } = req.body;
+    const { categoryId, relatedSystemId, summary, priority, description, attachmentIds } = req.body;
     
     const trimmedSummary = String(summary || '').trim();
     const trimmedDescription = String(description || '').trim();
@@ -112,6 +115,31 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: "Invalid category or related system" });
     }
 
+    let parsedAttachmentIds: number[] = [];
+    if (Array.isArray(attachmentIds)) {
+      parsedAttachmentIds = attachmentIds.map((id: any) => parseInt(id, 10)).filter(id => !isNaN(id));
+      if (parsedAttachmentIds.length > 5) {
+        return res.status(400).json({ error: "Cannot link more than 5 attachments" });
+      }
+      
+      // Verify attachments exist and are not already linked or deleted
+      if (parsedAttachmentIds.length > 0) {
+        const existingAttachments = await getPrisma().attachment.findMany({
+          where: { id: { in: parsedAttachmentIds }, isDeleted: false }
+        });
+        
+        if (existingAttachments.length !== parsedAttachmentIds.length) {
+          return res.status(400).json({ error: "One or more attachments are invalid, deleted, or do not exist" });
+        }
+        
+        for (const att of existingAttachments) {
+          if (att.ticketId !== null) {
+            return res.status(400).json({ error: "One or more attachments are already linked to a ticket" });
+          }
+        }
+      }
+    }
+
     const ticket = await getPrisma().ticket.create({
       data: {
         categoryId: parseInt(categoryId, 10),
@@ -123,6 +151,13 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
         requesterId,
       }
     });
+
+    if (parsedAttachmentIds.length > 0) {
+      await getPrisma().attachment.updateMany({
+        where: { id: { in: parsedAttachmentIds } },
+        data: { ticketId: ticket.id }
+      });
+    }
 
     const ticketNumber = `TKT-${String(ticket.id).padStart(3, '0')}`;
 
@@ -224,7 +259,11 @@ app.get("/api/tickets/:id", async (req: Request, res: Response): Promise<any> =>
 
     const ticket = await getPrisma().ticket.findUnique({
       where: { id: ticketId },
-      include: { category: true, relatedSystem: true }
+      include: { 
+        category: true, 
+        relatedSystem: true,
+        attachments: true
+      }
     });
 
     if (!ticket) {

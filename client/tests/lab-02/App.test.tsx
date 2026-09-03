@@ -7,6 +7,13 @@ import * as api from "../../src/api.js";
 describe("App", () => {
   beforeEach(() => {
     localStorage.setItem('dev_requester_user', JSON.stringify({ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }));
+    
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes('/api/dev/users')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }]) });
+      }
+      return Promise.reject(new Error('Not Found'));
+    }) as any;
   });
 
   afterEach(() => {
