@@ -60,4 +60,19 @@ model Ticket {
   category        Category      @relation(fields: [categoryId], references: [id])
   relatedSystem   RelatedSystem @relation(fields: [relatedSystemId], references: [id])
   requester       RequesterUser @relation(fields: [requesterId], references: [id])
+  attachments     Attachment[]
+}
+
+model Attachment {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int?
+  fileName      String
+  fileType      String
+  fileSize      Int
+  filePath      String
+  isDeleted     Boolean  @default(false)
+  removalReason String?
+  createdAt     DateTime @default(now())
+
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id])
 }
