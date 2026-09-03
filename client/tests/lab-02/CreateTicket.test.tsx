@@ -92,6 +92,30 @@ describe('CreateTicket Form', () => {
     });
   });
 
+  it('successfully submits the form with exact boundary lengths', async () => {
+    render(
+      <DevProvider>
+        <CreateTicket />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Category/), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/Related System/), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'A'.repeat(100) } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'B'.repeat(1000) } });
+
+    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Ticket TKT-001 created successfully!')).toBeInTheDocument();
+    });
+  });
+
   it('shows validation errors when exceeding max length', async () => {
     render(
       <DevProvider>

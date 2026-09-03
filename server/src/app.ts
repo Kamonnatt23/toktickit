@@ -105,6 +105,13 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: "Invalid priority" });
     }
 
+    const categoryExists = await getPrisma().category.findUnique({ where: { id: parseInt(categoryId, 10) } });
+    const systemExists = await getPrisma().relatedSystem.findUnique({ where: { id: parseInt(relatedSystemId, 10) } });
+    
+    if (!categoryExists || !systemExists) {
+      return res.status(400).json({ error: "Invalid category or related system" });
+    }
+
     const ticket = await getPrisma().ticket.create({
       data: {
         categoryId: parseInt(categoryId, 10),
@@ -112,6 +119,7 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
         summary: trimmedSummary,
         priority,
         description: trimmedDescription,
+        status: "New",
         requesterId,
       }
     });

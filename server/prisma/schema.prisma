@@ -53,6 +53,7 @@ model Ticket {
   summary         String
   priority        String        @default("Medium") // e.g., Low, Medium, High, Critical
   description     String
+  status          String        @default("New")
   requesterId     Int
   createdAt       DateTime      @default(now())
 

@@ -118,4 +118,36 @@ describe("Ticket APIs (Issue 3)", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Invalid priority/);
   });
+
+  it("POST /api/tickets validates non-existent categoryId", async () => {
+    const res = await request(app)
+      .post("/api/tickets")
+      .set("X-Requester-Id", String(requesterId))
+      .send({
+        categoryId: 99999, // non-existent
+        relatedSystemId: systemId,
+        summary: "Test issue",
+        priority: "High",
+        description: "Test description"
+      });
+      
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid category or related system/);
+  });
+
+  it("POST /api/tickets validates non-existent relatedSystemId", async () => {
+    const res = await request(app)
+      .post("/api/tickets")
+      .set("X-Requester-Id", String(requesterId))
+      .send({
+        categoryId,
+        relatedSystemId: 99999, // non-existent
+        summary: "Test issue",
+        priority: "High",
+        description: "Test description"
+      });
+      
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid category or related system/);
+  });
 });
