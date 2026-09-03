@@ -50,18 +50,16 @@ test.describe('Responsive UI verification', () => {
       await page.screenshot({ path: `playwright-report/screenshots/My-Tickets-${vp.name}.png`, fullPage: true });
 
       // Ticket Detail
-      // Only navigate if cards exist, otherwise skip ticket detail screenshot
-      const cardsCount = await page.locator('.card').count();
-      if (cardsCount > 1) { // 1 is the outer card, >1 means ticket cards exist
-        const firstCard = page.locator('.card:has-text("TKT-")').last();
-        await firstCard.waitFor();
-        await firstCard.click({ force: true });
-        
-        await page.waitForSelector('text=Ticket Details');
-        await checkOverflow(page);
-        await expect(page.locator('text=Ticket Details')).toBeVisible();
-        await page.screenshot({ path: `playwright-report/screenshots/Ticket-Detail-${vp.name}.png`, fullPage: true });
-      }
+      // Wait for ticket card to appear and verify at least one exists
+      const firstCard = page.locator('.card:has-text("TKT-")').last();
+      await firstCard.waitFor();
+      await expect(firstCard).toBeVisible();
+      await firstCard.click({ force: true });
+      
+      await page.waitForSelector('text=Ticket Details');
+      await checkOverflow(page);
+      await expect(page.locator('text=Ticket Details')).toBeVisible();
+      await page.screenshot({ path: `playwright-report/screenshots/Ticket-Detail-${vp.name}.png`, fullPage: true });
     });
   }
 });
