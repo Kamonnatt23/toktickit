@@ -66,8 +66,18 @@ describe('GET /api/tickets/:id', () => {
   });
 
   it('returns 403 Forbidden if accessing someone elses ticket', async () => {
+    // Requester A (otherRequesterId) owns Ticket A (otherTicketId)
+    // Requester B (requesterId) requests Ticket A
     const res = await request(app).get('/api/tickets/' + otherTicketId).set('X-Requester-Id', String(requesterId));
+    
+    // Assert response is 403 Forbidden
     expect(res.status).toBe(403);
+    
+    // Assert Ticket A's data is not exposed
+    expect(res.body).not.toHaveProperty('summary');
+    expect(res.body).not.toHaveProperty('description');
+    expect(res.body).not.toHaveProperty('ticketNumber');
+    expect(res.body).toHaveProperty('error');
   });
 
   it('returns 404 if ticket does not exist', async () => {
