@@ -63,33 +63,35 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: "File is required" });
     }
 
-    let ticketId: number | null = null;
-    if (req.body.ticketId) {
-      ticketId = parseInt(req.body.ticketId, 10);
-      if (isNaN(ticketId)) {
-        fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Invalid ticketId" });
-      }
+    if (!req.body.ticketId) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "ticketId is required" });
+    }
 
-      const ticket = await getPrisma().ticket.findUnique({
-        where: { id: ticketId },
-        include: { attachments: { where: { isDeleted: false } } }
-      });
+    const ticketId = parseInt(req.body.ticketId, 10);
+    if (isNaN(ticketId)) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Invalid ticketId" });
+    }
 
-      if (!ticket) {
-        fs.unlinkSync(req.file.path);
-        return res.status(404).json({ error: "Ticket not found" });
-      }
+    const ticket = await getPrisma().ticket.findUnique({
+      where: { id: ticketId },
+      include: { attachments: { where: { isDeleted: false } } }
+    });
 
-      if (ticket.requesterId !== auth.requesterId) {
-        fs.unlinkSync(req.file.path);
-        return res.status(403).json({ error: "Forbidden: Not your ticket" });
-      }
+    if (!ticket) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: "Ticket not found" });
+    }
 
-      if (ticket.attachments.length >= 5) {
-        fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Ticket already has 5 attachments" });
-      }
+    if (ticket.requesterId !== auth.requesterId) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ error: "Forbidden: Not your ticket" });
+    }
+
+    if (ticket.attachments.length >= 5) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Ticket already has 5 attachments" });
     }
 
     const attachment = await getPrisma().attachment.create({

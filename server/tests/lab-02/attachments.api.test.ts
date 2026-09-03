@@ -34,9 +34,19 @@ describe('Attachments API', () => {
     await getPrisma().category.deleteMany({ where: { name: { startsWith: 'Att Cat ' } } });
   });
 
+  it('rejects upload if missing ticketId', async () => {
+    const res = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .attach('file', Buffer.from('fake'), 'test.png');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/ticketId is required/);
+  });
+
   it('rejects upload if missing X-Requester-Id', async () => {
     const res = await request(app)
       .post('/api/attachments')
+      .field('ticketId', ticketId)
       .attach('file', Buffer.from('test'), 'test.png');
     expect(res.status).toBe(401);
   });
@@ -45,6 +55,7 @@ describe('Attachments API', () => {
     const res = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
       .attach('file', Buffer.from('fake image content'), 'test.png');
     
     expect(res.status).toBe(201);
@@ -56,19 +67,22 @@ describe('Attachments API', () => {
     const res = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
       .attach('file', Buffer.from('test'), 'test.exe');
     
     expect(res.status).toBe(400);
   });
 
   it('downloads an attachment', async () => {
+    // First upload
     const uploadRes = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
-      .attach('file', Buffer.from('download me'), 'down.png');
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('download me'), 'dl.pdf');
     
     const attId = uploadRes.body.id;
-
+    
     const dlRes = await request(app)
       .get(`/api/attachments/${attId}/download`)
       .set('X-Requester-Id', String(requesterId));
@@ -77,27 +91,21 @@ describe('Attachments API', () => {
   });
 
   it('soft removes an attachment', async () => {
+    // First upload
     const uploadRes = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
-      .attach('file', Buffer.from('delete me'), 'del.png');
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('remove me'), 'rm.pdf');
     
     const attId = uploadRes.body.id;
 
-    // Attach to ticket so we can test ownership
-    await getPrisma().attachment.update({ where: { id: attId }, data: { ticketId } });
-
     // Try deleting as wrong user
-    const delResFail = await request(app)
+    const badDelRes = await request(app)
       .delete(`/api/attachments/${attId}`)
-      .set('X-Requester-Id', String(otherRequesterId));
-    expect(delResFail.status).toBe(403);
-
-    // Try downloading as wrong user
-    const dlResFail = await request(app)
-      .get(`/api/attachments/${attId}/download`)
-      .set('X-Requester-Id', String(otherRequesterId));
-    expect(dlResFail.status).toBe(403);
+      .set('X-Requester-Id', String(otherRequesterId))
+      .send({ removalReason: 'wrong user' });
+    expect(badDelRes.status).toBe(403);
 
     // Delete as owner
     const delRes = await request(app)

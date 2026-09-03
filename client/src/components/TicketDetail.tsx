@@ -217,12 +217,20 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
                 <div key={att.id} className="card border-0 shadow-sm" style={{ backgroundColor: '#ffffff', borderRadius: '15px' }}>
                   <div className="card-body p-3 d-flex justify-content-between align-items-center">
                     <div className="text-truncate me-3">
-                      <strong>{att.fileName}</strong> <span className="text-muted small">({Math.round(att.fileSize / 1024)} KB)</span>
+                      <strong style={{ textDecoration: att.isDeleted ? 'line-through' : 'none', color: att.isDeleted ? '#6c757d' : 'inherit' }}>
+                        {att.fileName}
+                      </strong> 
+                      <span className="text-muted small ms-1">({Math.round(att.fileSize / 1024)} KB)</span>
+                      {att.isDeleted && (
+                        <div className="text-danger small mt-1">Removed: {att.removalReason || 'No reason provided'}</div>
+                      )}
                     </div>
-                    <div className="d-flex gap-2 flex-shrink-0">
-                      <button className="btn btn-sm btn-light" style={{ borderRadius: '50rem' }} onClick={() => handleDownload(att.id, att.fileName)}>Download</button>
-                      <button className="btn btn-sm btn-outline-danger" style={{ borderRadius: '50rem' }} onClick={() => handleRemove(att.id)}>Remove</button>
-                    </div>
+                    {!att.isDeleted && (
+                      <div className="d-flex gap-2 flex-shrink-0">
+                        <button className="btn btn-sm btn-light" style={{ borderRadius: '50rem' }} onClick={() => handleDownload(att.id, att.fileName)}>Download</button>
+                        <button className="btn btn-sm btn-outline-danger" style={{ borderRadius: '50rem' }} onClick={() => handleRemove(att.id)}>Remove</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

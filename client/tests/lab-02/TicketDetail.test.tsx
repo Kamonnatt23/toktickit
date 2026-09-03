@@ -20,7 +20,8 @@ const mockTicket = {
 const mockTicketWithAttachments = { 
   ...mockTicket,
   attachments: [
-    { id: 101, fileName: 'screenshot.png', fileSize: 50000, isDeleted: false }
+    { id: 101, fileName: 'screenshot.png', fileSize: 50000, isDeleted: false },
+    { id: 102, fileName: 'old-screenshot.png', fileSize: 40000, isDeleted: true, removalReason: 'wrong file' }
   ]
 };
 
@@ -79,11 +80,17 @@ describe('TicketDetail', () => {
     });
   });
 
-  it('renders attachments list', async () => {
+  it('renders attachments list including soft-deleted ones', async () => {
     render(<DevProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></DevProvider>);
     await waitFor(() => {
       expect(screen.getByText('screenshot.png')).toBeInTheDocument();
+      expect(screen.getByText('old-screenshot.png')).toBeInTheDocument();
+      expect(screen.getByText('Removed: wrong file')).toBeInTheDocument();
     });
+    
+    // Check that there is only one download button (for the active attachment)
+    expect(screen.getAllByRole('button', { name: 'Download' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1);
   });
 
   it('handles attachment upload', async () => {

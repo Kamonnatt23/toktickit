@@ -64,8 +64,8 @@ model Ticket {
 }
 
 model Attachment {
-  id        Int      @id @default(autoincrement())
-  ticketId  Int?
+  id            Int      @id @default(autoincrement())
+  ticketId      Int
   fileName      String
   fileType      String
   fileSize      Int
@@ -74,5 +74,5 @@ model Attachment {
   removalReason String?
   createdAt     DateTime @default(now())
 
-  ticket    Ticket?  @relation(fields: [ticketId], references: [id])
+  ticket        Ticket   @relation(fields: [ticketId], references: [id])
 }

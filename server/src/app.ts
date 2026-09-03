@@ -262,9 +262,7 @@ app.get("/api/tickets/:id", async (req: Request, res: Response): Promise<any> =>
       include: { 
         category: true, 
         relatedSystem: true,
-        attachments: {
-          where: { isDeleted: false }
-        }
+        attachments: true
       }
     });
 
