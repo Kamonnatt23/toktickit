@@ -56,6 +56,7 @@ export function DevProvider({ children }: { children: ReactNode }) {
       .catch(err => {
         setError(err.message);
         setLoading(false);
+        localStorage.removeItem('dev_requester_user');
       });
   }, []);
 

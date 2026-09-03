@@ -148,4 +148,24 @@ describe('DevContext & Requester Selection (T-01)', () => {
     expect(screen.queryByText(/\[TESTING MODE\]/i)).not.toBeInTheDocument();
     expect(localStorage.getItem('dev_requester_user')).toBeNull();
   });
+
+  it('clears localStorage and does not restore user if API fails', async () => {
+    const staleUser = { id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' };
+    localStorage.setItem('dev_requester_user', JSON.stringify(staleUser));
+
+    global.fetch = vi.fn(() => Promise.reject(new Error('Network Error'))) as any;
+    
+    render(
+      <DevProvider>
+        <DevRequesterSelection />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Network Error/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/\[TESTING MODE\]/i)).not.toBeInTheDocument();
+    expect(localStorage.getItem('dev_requester_user')).toBeNull();
+  });
 });
