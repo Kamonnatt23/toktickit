@@ -25,8 +25,10 @@ describe('Attachments API', () => {
   });
 
   afterAll(async () => {
-    await getPrisma().attachment.deleteMany({ where: { ticketId } });
-    await getPrisma().ticket.deleteMany({ where: { id: ticketId } });
+    const tickets = await getPrisma().ticket.findMany({ where: { requesterId: { in: [requesterId, otherRequesterId] } } });
+    const ticketIds = tickets.map(t => t.id);
+    await getPrisma().attachment.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await getPrisma().ticket.deleteMany({ where: { id: { in: ticketIds } } });
     await getPrisma().requesterUser.deleteMany({ where: { id: { in: [requesterId, otherRequesterId] } } });
     await getPrisma().relatedSystem.deleteMany({ where: { name: { startsWith: 'Att Sys ' } } });
     await getPrisma().category.deleteMany({ where: { name: { startsWith: 'Att Cat ' } } });
@@ -161,22 +163,36 @@ describe('Attachments API', () => {
     expect(removedAtt.removalReason).toBe('mistake');
   });
 
-  it('enforces max 5 active attachments', async () => {
-    // Current active attachments: test.png (from 'uploads a file'), big.pdf (from 'allows exactly 5 MB'), dl.pdf (from 'downloads'), rm-empty.pdf (from 'rejects empty removal reason'). 
-    // Wait, rm-empty failed to delete because it was empty, so it's still active. So we have 4 active ones.
-    // Let's add 1 more to reach 5.
-    const res5 = await request(app)
-      .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
-      .field('ticketId', ticketId)
-      .attach('file', Buffer.from('5th'), 'five.pdf');
-    expect(res5.status).toBe(201);
+  it('enforces max 5 active attachments independently', async () => {
+    // Create a new independent ticket
+    const cat = await getPrisma().category.findFirst();
+    const sys = await getPrisma().relatedSystem.findFirst();
+    const newTicket = await getPrisma().ticket.create({
+      data: { 
+        categoryId: cat!.id, 
+        relatedSystemId: sys!.id, 
+        requesterId, 
+        summary: '5 attachment limit test', 
+        priority: 'Medium', 
+        description: 'Testing limits' 
+      }
+    });
+    
+    // Upload 5 attachments
+    for (let i = 1; i <= 5; i++) {
+      const res = await request(app)
+        .post('/api/attachments')
+        .set('X-Requester-Id', String(requesterId))
+        .field('ticketId', newTicket.id)
+        .attach('file', Buffer.from(`content \${i}`), `file\${i}.pdf`);
+      expect(res.status).toBe(201);
+    }
 
     // 6th upload should fail
     const res6 = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
-      .field('ticketId', ticketId)
+      .field('ticketId', newTicket.id)
       .attach('file', Buffer.from('6th'), 'six.pdf');
     expect(res6.status).toBe(400);
     expect(res6.body.error).toMatch(/5 attachments/);
