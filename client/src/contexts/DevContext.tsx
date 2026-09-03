@@ -24,11 +24,12 @@ export function DevProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load from local storage
+    let initialUser: User | null = null;
     const saved = localStorage.getItem('dev_requester_user');
     if (saved) {
       try {
-        setActiveUser(JSON.parse(saved));
+        initialUser = JSON.parse(saved);
+        setActiveUser(initialUser);
       } catch (e) {
         console.error("Failed to parse saved user", e);
       }
@@ -42,9 +43,13 @@ export function DevProvider({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error('Failed to fetch dev users');
         return res.json();
       })
-      .then(data => {
+      .then((data: User[]) => {
         setUsers(data);
         setLoading(false);
+        if (initialUser && !data.some(u => u.id === initialUser!.id)) {
+          setActiveUser(null);
+          localStorage.removeItem('dev_requester_user');
+        }
       })
       .catch(err => {
         setError(err.message);

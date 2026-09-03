@@ -31,33 +31,38 @@ export function DevRequesterSelection() {
         <div className="card-body p-4 bg-light">
           {loading && <p>Loading mock users...</p>}
           {error && <div className="alert alert-danger">{error}</div>}
-          {!loading && !error && (
-            <div className="mb-4">
-              <label htmlFor="userSelect" className="form-label text-dark fw-bold">Select Requester</label>
-              <select 
-                id="userSelect"
-                className="form-select form-select-lg mb-3" 
-                value={selectedId}
-                onChange={e => setSelectedId(e.target.value)}
-              >
-                <option value="">-- Choose a mock user --</option>
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
-                ))}
-              </select>
-            </div>
+          {!loading && !error && users.length === 0 && (
+            <div className="alert alert-info">No active requesters available</div>
           )}
-          <button 
-            className="btn btn-success btn-lg w-100" 
-            style={{ backgroundColor: '#006B3C', borderColor: '#006B3C' }}
-            disabled={!selectedId}
-            onClick={() => {
-              const user = users.find(u => u.id === parseInt(selectedId));
-              if (user) setActiveUser(user);
-            }}
-          >
-            Continue as User
-          </button>
+          {!loading && !error && users.length > 0 && (
+            <>
+              <div className="mb-4">
+                <label htmlFor="userSelect" className="form-label text-dark fw-bold">Select Requester</label>
+                <select 
+                  id="userSelect"
+                  className="form-select form-select-lg mb-3" 
+                  value={selectedId}
+                  onChange={e => setSelectedId(e.target.value)}
+                >
+                  <option value="">-- Choose a mock user --</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+              <button 
+                className="btn btn-success btn-lg w-100" 
+                style={{ backgroundColor: '#006B3C', borderColor: '#006B3C' }}
+                disabled={!selectedId}
+                onClick={() => {
+                  const user = users.find(u => u.id === parseInt(selectedId));
+                  if (user) setActiveUser(user);
+                }}
+              >
+                Continue as User
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

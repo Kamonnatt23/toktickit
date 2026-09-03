@@ -92,4 +92,56 @@ describe('DevContext & Requester Selection (T-01)', () => {
     
     expect(localStorage.getItem('dev_requester_user')).toBeNull();
   });
+  it('handles API fetch failure gracefully', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new Error('Network Error'))) as any;
+    
+    render(
+      <DevProvider>
+        <DevRequesterSelection />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Network Error/i)).toBeInTheDocument();
+    });
+  });
+
+  it('displays empty state when active requesters list is empty', async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([]),
+      })
+    ) as any;
+
+    render(
+      <DevProvider>
+        <DevRequesterSelection />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/No active requesters available/i)).toBeInTheDocument();
+    });
+  });
+
+  it('clears stale/invalid user in localStorage if not in active list', async () => {
+    const staleUser = { id: 99, name: 'Stale User', email: 'stale@example.com', role: 'Requester' };
+    localStorage.setItem('dev_requester_user', JSON.stringify(staleUser));
+
+    render(
+      <DevProvider>
+        <DevRequesterSelection />
+      </DevProvider>
+    );
+
+    // Initially might see banner or loading
+    
+    // Then it fetches list, doesn't find ID 99, and clears localStorage
+    await waitFor(() => {
+      expect(screen.getByText(/Select Development Context/i)).toBeInTheDocument();
+    });
+    
+    expect(localStorage.getItem('dev_requester_user')).toBeNull();
+  });
 });
