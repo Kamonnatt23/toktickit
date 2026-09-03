@@ -12,7 +12,11 @@ interface Ticket {
   relatedSystem: { name: string };
 }
 
-export function MyTickets() {
+interface MyTicketsProps {
+  onTicketClick: (id: number) => void;
+}
+
+export function MyTickets({ onTicketClick }: MyTicketsProps) {
   const { activeUser } = useDevContext();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,7 +154,20 @@ export function MyTickets() {
             <div className="mb-3 text-muted fw-bold">Total Tickets: {total}</div>
             <div className="d-flex flex-column gap-3">
               {tickets.map(ticket => (
-                <div key={ticket.id} className="card border-0 shadow-sm" style={{ borderRadius: '15px', backgroundColor: '#ffffff' }}>
+                <div 
+                  key={ticket.id} 
+                  className="card border-0 shadow-sm" 
+                  style={{ borderRadius: '15px', backgroundColor: '#ffffff', cursor: 'pointer', transition: 'transform 0.2s ease, box-shadow 0.2s ease' }}
+                  onClick={() => onTicketClick(ticket.id)}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 .5rem 1rem rgba(0,0,0,.15)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.transform = 'none';
+                    e.currentTarget.style.boxShadow = '0 .125rem .25rem rgba(0,0,0,.075)';
+                  }}
+                >
                   <div className="card-body p-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
                     <div>
                       <div className="d-flex align-items-center gap-2 mb-2">
