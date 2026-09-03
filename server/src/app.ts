@@ -12,6 +12,10 @@ export const app = express();
 app.use(cors());          // already wired: lets the Vite dev server call this API
 app.use(express.json());
 
+app.get("/", (_req: Request, res: Response) => {
+  res.send("TokTickIT API is running! Access /api/health to check status.");
+});
+
 // ---------------------------------------------------------------------------
 // Issue 2 — API health check
 // Make the test in tests/lab-01/health.test.ts pass.
@@ -31,6 +35,21 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
   } catch (err) {
     console.error("Error fetching categories:", err);
     res.status(500).json({ error: "Failed to load categories" });
+  }
+});
+
+app.get("/api/dev/users", async (_req: Request, res: Response) => {
+  try {
+    const users = await getPrisma().requesterUser.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: { name: "asc" },
+    });
+    
+    res.status(200).json(users);
+  } catch (err) {
+    console.error("Error fetching dev users:", err);
+    res.status(500).json({ error: "Failed to load mock users" });
   }
 });
 
