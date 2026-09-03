@@ -7,12 +7,13 @@ export function DevRequesterSelection() {
 
   if (activeUser) {
     return (
-      <div className="bg-warning text-dark px-3 py-2 d-flex justify-content-between align-items-center" style={{ fontSize: '0.9rem', borderBottom: '1px solid #d39e00' }}>
-        <div>
-          <strong>[TESTING MODE]</strong> Logged in as: {activeUser.name} ({activeUser.email})
-        </div>
+      <div className="d-flex align-items-center gap-3">
+        <span className="fw-bold d-none d-md-inline" style={{ color: '#006B3C', fontSize: '0.9rem' }}>
+          <strong>[TESTING MODE]</strong> {activeUser.name}
+        </span>
         <button 
-          className="btn btn-sm btn-outline-dark" 
+          className="btn btn-sm btn-outline-danger" 
+          style={{ borderRadius: '50rem', padding: '0.4rem 1rem' }}
           onClick={() => setActiveUser(null)}
         >
           Change Requester
@@ -22,9 +23,9 @@ export function DevRequesterSelection() {
   }
 
   return (
-    <div className="position-fixed top-0 start-0 w-100 h-100 bg-dark bg-opacity-75 d-flex justify-content-center align-items-center" style={{ zIndex: 1050 }}>
-      <div className="card shadow-lg" style={{ maxWidth: 500, width: '100%' }}>
-        <div className="card-header bg-dark text-white border-bottom-0 pt-4 pb-3 px-4">
+    <div className="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style={{ zIndex: 1050, backgroundColor: 'rgba(253, 250, 246, 0.95)' }}>
+      <div className="card shadow-lg border-0" style={{ maxWidth: 500, width: '100%', borderRadius: '25px', overflow: 'hidden' }}>
+        <div className="card-header text-white border-bottom-0 pt-4 pb-3 px-4" style={{ backgroundColor: '#006B3C' }}>
           <h2 className="h4 mb-0">Select Development Context</h2>
           <small className="text-light opacity-75">Simulate user login for testing purposes</small>
         </div>

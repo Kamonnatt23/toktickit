@@ -133,4 +133,75 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
   }
 });
 
+app.get("/api/tickets", async (req: Request, res: Response): Promise<any> => {
+  try {
+    const requesterIdStr = req.header("X-Requester-Id");
+    if (!requesterIdStr) return res.status(401).json({ error: "Missing X-Requester-Id header" });
+    const requesterId = parseInt(requesterIdStr, 10);
+    if (isNaN(requesterId)) return res.status(401).json({ error: "Invalid X-Requester-Id header" });
+
+    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
+    if (!requester || !requester.isActive) {
+      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
+    }
+
+    const { search, status, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+
+    const pageNum = parseInt(page as string, 10) || 1;
+    const limitNum = parseInt(limit as string, 10) || 10;
+    const skip = (pageNum - 1) * limitNum;
+
+    const whereClause: any = { requesterId };
+
+    if (status && status !== 'All') {
+      whereClause.status = status;
+    }
+
+    if (search) {
+      const searchStr = String(search).trim();
+      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i);
+      
+      if (searchIdMatch) {
+         whereClause.id = parseInt(searchIdMatch[1], 10);
+      } else {
+         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+      }
+    }
+
+    const validSortFields = ['createdAt', 'priority', 'status'];
+    const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';
+    const order = sortOrder === 'asc' ? 'asc' : 'desc';
+
+    const [tickets, total] = await Promise.all([
+      getPrisma().ticket.findMany({
+        where: whereClause,
+        include: { category: true, relatedSystem: true },
+        orderBy: { [sortField]: order },
+        skip,
+        take: limitNum,
+      }),
+      getPrisma().ticket.count({ where: whereClause })
+    ]);
+
+    const data = tickets.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    return res.status(200).json({
+      data,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching tickets:", err);
+    return res.status(500).json({ error: "Failed to fetch tickets" });
+  }
+});
+
 export default app;
