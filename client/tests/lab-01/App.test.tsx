@@ -5,9 +5,20 @@ import App from "../../src/App.js";
 import * as api from "../../src/api.js";
 
 describe("App", () => {
-  it("renders the TokTickIT heading", () => {
+  beforeEach(() => {
+    localStorage.setItem('dev_requester_user', JSON.stringify({ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }));
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the TokTickIT heading", async () => {
     render(<App />);
-    expect(screen.getByText(/TokTickIT/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/TokTickIT/i)).toBeInTheDocument();
+    });
   });
 
   it("shows Online and the seeded categories on success", async () => {
@@ -22,6 +33,10 @@ describe("App", () => {
     });
     
     render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
     const btn = screen.getByRole("button", { name: /Check System/i });
     await userEvent.click(btn);
     
@@ -37,6 +52,10 @@ describe("App", () => {
     vi.spyOn(api, "checkSystem").mockRejectedValue(new Error("Unable to connect to TokTickIT API"));
     
     render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
     const btn = screen.getByRole("button", { name: /Check System/i });
     await userEvent.click(btn);
     

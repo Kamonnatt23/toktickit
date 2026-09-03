@@ -85,5 +85,63 @@ describe('MyTickets', () => {
     await waitFor(() => {
       expect(screen.getByText('No tickets found!')).toBeInTheDocument();
     });
+    
+    // Test sorting toggle
+    const sortBtn = screen.getByText('Desc ↓');
+    fireEvent.click(sortBtn);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Asc ↑')).toBeInTheDocument();
+    });
+  });
+  
+  it('handles pagination', async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes('/api/dev/users')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
+      }
+      if (url.includes('/api/tickets')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: mockTickets, pagination: { total: 10, totalPages: 2 } }) });
+      }
+      return Promise.reject(new Error('Not Found'));
+    }) as any;
+
+    render(<DevProvider><MyTickets /></DevProvider>);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    });
+    
+    const nextBtn = screen.getByText('Next');
+    fireEvent.click(nextBtn);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    });
+    
+    const prevBtn = screen.getByText('Previous');
+    fireEvent.click(prevBtn);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    });
+  });
+  
+  it('shows error state on API failure', async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes('/api/dev/users')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
+      }
+      if (url.includes('/api/tickets')) {
+        return Promise.reject(new Error('Failed to fetch tickets'));
+      }
+      return Promise.reject(new Error('Not Found'));
+    }) as any;
+    
+    render(<DevProvider><MyTickets /></DevProvider>);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Failed to fetch tickets')).toBeInTheDocument();
+    });
   });
 });
