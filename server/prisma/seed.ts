@@ -18,6 +18,22 @@ async function main() {
     });
   }
 
+  // Issue 3 Seed Data: Related Systems
+  const systems = [
+    "ERP",
+    "CRM",
+    "HRIS",
+    "Email",
+    "VPN",
+  ];
+  for (const name of systems) {
+    await prisma.relatedSystem.upsert({
+      where: { name },
+      update: {}, 
+      create: { name },
+    });
+  }
+
   // Lab 2 Seed Data: Development Requesters
   const requesters = [
     { name: "John Doe", email: "john@example.com", isActive: true },

@@ -18,6 +18,7 @@ model Category {
   id        Int      @id @default(autoincrement())
   name      String   @unique
   createdAt DateTime @default(now())
+  tickets   Ticket[]
 }
 
 // ---------------------------------------------------------------------------
@@ -31,4 +32,31 @@ model RequesterUser {
   isActive  Boolean  @default(true)
   role      String   @default("Requester")
   createdAt DateTime @default(now())
+  tickets   Ticket[]
+}
+
+// ---------------------------------------------------------------------------
+// Issue 3 — Create Ticket models
+// ---------------------------------------------------------------------------
+
+model RelatedSystem {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  tickets   Ticket[]
+}
+
+model Ticket {
+  id              Int           @id @default(autoincrement())
+  categoryId      Int
+  relatedSystemId Int
+  summary         String
+  priority        String        @default("Medium") // e.g., Low, Medium, High, Critical
+  description     String
+  requesterId     Int
+  createdAt       DateTime      @default(now())
+
+  category        Category      @relation(fields: [categoryId], references: [id])
+  relatedSystem   RelatedSystem @relation(fields: [relatedSystemId], references: [id])
+  requester       RequesterUser @relation(fields: [requesterId], references: [id])
 }

@@ -29,8 +29,8 @@ describe("App", () => {
       expect(screen.getByText(/System Status: Online/i)).toBeInTheDocument();
     });
     expect(screen.getByText("Supported Request Categories:")).toBeInTheDocument();
-    expect(screen.getByText("Account and Access")).toBeInTheDocument();
-    expect(screen.getByText("Hardware")).toBeInTheDocument();
+    expect(screen.getAllByText("Account and Access")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("Hardware")[0]).toBeInTheDocument();
   });
 
   it("shows an Offline error message when the API is unavailable", async () => {

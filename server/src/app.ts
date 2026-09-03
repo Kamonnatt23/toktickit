@@ -53,4 +53,58 @@ app.get("/api/dev/users", async (_req: Request, res: Response) => {
   }
 });
 
+app.get("/api/related-systems", async (_req: Request, res: Response) => {
+  try {
+    const systems = await getPrisma().relatedSystem.findMany({
+      select: { id: true, name: true },
+      orderBy: { id: "asc" },
+    });
+    res.status(200).json(systems);
+  } catch (err) {
+    console.error("Error fetching related systems:", err);
+    res.status(500).json({ error: "Failed to load related systems" });
+  }
+});
+
+app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
+  try {
+    const requesterIdStr = req.header("X-Requester-Id");
+    if (!requesterIdStr) {
+      return res.status(401).json({ error: "Unauthorized: Missing X-Requester-Id header" });
+    }
+    
+    const requesterId = parseInt(requesterIdStr, 10);
+    if (isNaN(requesterId)) {
+      return res.status(401).json({ error: "Unauthorized: Invalid X-Requester-Id header" });
+    }
+
+    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
+    if (!requester || !requester.isActive) {
+      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
+    }
+
+    const { categoryId, relatedSystemId, summary, priority, description } = req.body;
+    
+    if (!categoryId || !relatedSystemId || !summary || !priority || !description) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const ticket = await getPrisma().ticket.create({
+      data: {
+        categoryId: parseInt(categoryId, 10),
+        relatedSystemId: parseInt(relatedSystemId, 10),
+        summary: String(summary).trim(),
+        priority,
+        description: String(description).trim(),
+        requesterId,
+      }
+    });
+
+    return res.status(201).json(ticket);
+  } catch (err) {
+    console.error("Error creating ticket:", err);
+    return res.status(500).json({ error: "Failed to create ticket" });
+  }
+});
+
 export default app;
