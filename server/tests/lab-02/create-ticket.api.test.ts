@@ -22,6 +22,7 @@ describe("Ticket APIs (Issue 3)", () => {
 
   afterEach(async () => {
     // Clean up created tickets
+    await getPrisma().attachment.deleteMany();
     await getPrisma().ticket.deleteMany();
   });
 

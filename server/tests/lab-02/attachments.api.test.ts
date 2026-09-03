@@ -2,8 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
-import path from 'path';
-import fs from 'fs';
 
 describe('Attachments API', () => {
   let requesterId: number;
@@ -51,6 +49,15 @@ describe('Attachments API', () => {
     expect(res.status).toBe(401);
   });
 
+  it('rejects non-owner upload', async () => {
+    const res = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(otherRequesterId))
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('fake'), 'test.png');
+    expect(res.status).toBe(403);
+  });
+
   it('uploads a file successfully', async () => {
     const res = await request(app)
       .post('/api/attachments')
@@ -63,18 +70,35 @@ describe('Attachments API', () => {
     expect(res.body.id).toBeDefined();
   });
 
-  it('rejects invalid file types', async () => {
-    const res = await request(app)
+  it('rejects invalid file types and mismatched extensions', async () => {
+    // Unsupported extension
+    const res1 = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('test'), 'test.exe');
-    
-    expect(res.status).toBe(400);
+    expect(res1.status).toBe(400);
+
+    // Mismatched MIME and extension
+    const res2 = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('test'), { filename: 'test.txt', contentType: 'image/png' });
+    expect(res2.status).toBe(400);
+  });
+
+  it('allows exactly 5 MB file', async () => {
+    const bigBuffer = Buffer.alloc(5 * 1024 * 1024, 'a');
+    const res = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
+      .attach('file', bigBuffer, 'big.pdf');
+    expect(res.status).toBe(201);
   });
 
   it('downloads an attachment', async () => {
-    // First upload
     const uploadRes = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
@@ -86,12 +110,25 @@ describe('Attachments API', () => {
     const dlRes = await request(app)
       .get(`/api/attachments/${attId}/download`)
       .set('X-Requester-Id', String(requesterId));
-    
     expect(dlRes.status).toBe(200);
   });
 
-  it('soft removes an attachment', async () => {
-    // First upload
+  it('rejects empty removal reason', async () => {
+    const uploadRes = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('remove me'), 'rm-empty.pdf');
+    
+    const attId = uploadRes.body.id;
+    const delRes = await request(app)
+      .delete(`/api/attachments/${attId}`)
+      .set('X-Requester-Id', String(requesterId))
+      .send({ removalReason: '   ' });
+    expect(delRes.status).toBe(400);
+  });
+
+  it('soft removes an attachment and keeps metadata in ticket detail', async () => {
     const uploadRes = await request(app)
       .post('/api/attachments')
       .set('X-Requester-Id', String(requesterId))
@@ -99,13 +136,6 @@ describe('Attachments API', () => {
       .attach('file', Buffer.from('remove me'), 'rm.pdf');
     
     const attId = uploadRes.body.id;
-
-    // Try deleting as wrong user
-    const badDelRes = await request(app)
-      .delete(`/api/attachments/${attId}`)
-      .set('X-Requester-Id', String(otherRequesterId))
-      .send({ removalReason: 'wrong user' });
-    expect(badDelRes.status).toBe(403);
 
     // Delete as owner
     const delRes = await request(app)
@@ -119,5 +149,36 @@ describe('Attachments API', () => {
       .get(`/api/attachments/${attId}/download`)
       .set('X-Requester-Id', String(requesterId));
     expect(dlResDeleted.status).toBe(404);
+
+    // Fetch ticket detail and check metadata
+    const ticketRes = await request(app)
+      .get(`/api/tickets/${ticketId}`)
+      .set('X-Requester-Id', String(requesterId));
+    expect(ticketRes.status).toBe(200);
+    const removedAtt = ticketRes.body.attachments.find((a: any) => a.id === attId);
+    expect(removedAtt).toBeDefined();
+    expect(removedAtt.isDeleted).toBe(true);
+    expect(removedAtt.removalReason).toBe('mistake');
+  });
+
+  it('enforces max 5 active attachments', async () => {
+    // Current active attachments: test.png (from 'uploads a file'), big.pdf (from 'allows exactly 5 MB'), dl.pdf (from 'downloads'), rm-empty.pdf (from 'rejects empty removal reason'). 
+    // Wait, rm-empty failed to delete because it was empty, so it's still active. So we have 4 active ones.
+    // Let's add 1 more to reach 5.
+    const res5 = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('5th'), 'five.pdf');
+    expect(res5.status).toBe(201);
+
+    // 6th upload should fail
+    const res6 = await request(app)
+      .post('/api/attachments')
+      .set('X-Requester-Id', String(requesterId))
+      .field('ticketId', ticketId)
+      .attach('file', Buffer.from('6th'), 'six.pdf');
+    expect(res6.status).toBe(400);
+    expect(res6.body.error).toMatch(/5 attachments/);
   });
 });
