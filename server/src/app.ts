@@ -85,22 +85,40 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
 
     const { categoryId, relatedSystemId, summary, priority, description } = req.body;
     
-    if (!categoryId || !relatedSystemId || !summary || !priority || !description) {
+    const trimmedSummary = String(summary || '').trim();
+    const trimmedDescription = String(description || '').trim();
+    
+    if (!categoryId || !relatedSystemId || !trimmedSummary || !priority || !trimmedDescription) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+    
+    if (trimmedSummary.length > 100) {
+      return res.status(400).json({ error: "Summary exceeds maximum length of 100 characters" });
+    }
+    
+    if (trimmedDescription.length > 1000) {
+      return res.status(400).json({ error: "Description exceeds maximum length of 1000 characters" });
+    }
+    
+    const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
+    if (!validPriorities.includes(priority)) {
+      return res.status(400).json({ error: "Invalid priority" });
     }
 
     const ticket = await getPrisma().ticket.create({
       data: {
         categoryId: parseInt(categoryId, 10),
         relatedSystemId: parseInt(relatedSystemId, 10),
-        summary: String(summary).trim(),
+        summary: trimmedSummary,
         priority,
-        description: String(description).trim(),
+        description: trimmedDescription,
         requesterId,
       }
     });
 
-    return res.status(201).json(ticket);
+    const ticketNumber = `TKT-${String(ticket.id).padStart(3, '0')}`;
+
+    return res.status(201).json({ ...ticket, ticketNumber });
   } catch (err) {
     console.error("Error creating ticket:", err);
     return res.status(500).json({ error: "Failed to create ticket" });

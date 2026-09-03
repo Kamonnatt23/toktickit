@@ -22,7 +22,7 @@ describe('CreateTicket Form', () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSystems) });
       }
       if (url.includes('/api/tickets')) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1 }) });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, ticketNumber: 'TKT-001' }) });
       }
       return Promise.reject(new Error('Not Found'));
     }) as any;
@@ -68,7 +68,7 @@ describe('CreateTicket Form', () => {
     });
   });
 
-  it('successfully submits the form', async () => {
+  it('successfully submits the form and shows Ticket Number', async () => {
     render(
       <DevProvider>
         <CreateTicket />
@@ -88,7 +88,45 @@ describe('CreateTicket Form', () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('Ticket created successfully!')).toBeInTheDocument();
+      expect(screen.getByText('Ticket TKT-001 created successfully!')).toBeInTheDocument();
+    });
+  });
+
+  it('shows validation errors when exceeding max length', async () => {
+    render(
+      <DevProvider>
+        <CreateTicket />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Category/), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/Related System/), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'A'.repeat(101) } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'B'.repeat(1001) } });
+
+    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Summary must be 100 characters or less')).toBeInTheDocument();
+      expect(screen.getByText('Description must be 1000 characters or less')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error when dropdowns fail to load', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new Error('Network Error'))) as any;
+    render(
+      <DevProvider>
+        <CreateTicket />
+      </DevProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Network Error')).toBeInTheDocument();
     });
   });
 });

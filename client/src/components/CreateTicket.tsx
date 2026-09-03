@@ -18,6 +18,7 @@ export function CreateTicket() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState('');
+  const [dropdownError, setDropdownError] = useState('');
   
   const [form, setForm] = useState({
     categoryId: '',
@@ -39,10 +40,14 @@ export function CreateTicket() {
           fetch(`${API_URL}/api/related-systems`)
         ]);
         
-        if (catRes.ok) setCategories(await catRes.json());
-        if (sysRes.ok) setSystems(await sysRes.json());
-      } catch (err) {
-        console.error("Failed to load dropdowns");
+        if (!catRes.ok || !sysRes.ok) {
+          throw new Error('Failed to load dropdown data from the server.');
+        }
+
+        setCategories(await catRes.json());
+        setSystems(await sysRes.json());
+      } catch (err: any) {
+        setDropdownError(err.message || 'Failed to load dropdowns.');
       } finally {
         setLoading(false);
       }
@@ -65,8 +70,25 @@ export function CreateTicket() {
     const newErrors: Record<string, string> = {};
     if (!form.categoryId) newErrors.categoryId = "Category is required";
     if (!form.relatedSystemId) newErrors.relatedSystemId = "Related System is required";
-    if (!form.summary.trim()) newErrors.summary = "Summary is required";
-    if (!form.description.trim()) newErrors.description = "Description is required";
+    
+    const trimmedSummary = form.summary.trim();
+    if (!trimmedSummary) {
+      newErrors.summary = "Summary is required";
+    } else if (trimmedSummary.length > 100) {
+      newErrors.summary = "Summary must be 100 characters or less";
+    }
+
+    const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
+    if (!validPriorities.includes(form.priority)) {
+      newErrors.priority = "Invalid priority selected";
+    }
+
+    const trimmedDescription = form.description.trim();
+    if (!trimmedDescription) {
+      newErrors.description = "Description is required";
+    } else if (trimmedDescription.length > 1000) {
+      newErrors.description = "Description must be 1000 characters or less";
+    }
     
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -96,7 +118,8 @@ export function CreateTicket() {
         throw new Error('Failed to create ticket');
       }
       
-      setSuccess('Ticket created successfully!');
+      const resData = await res.json();
+      setSuccess(`Ticket ${resData.ticketNumber} created successfully!`);
       setForm({
         categoryId: '',
         relatedSystemId: '',
@@ -119,6 +142,7 @@ export function CreateTicket() {
         <h2 className="h4 mb-0 text-center">Create New IT Request</h2>
       </div>
       <div className="card-body p-4 p-md-5">
+        {dropdownError && <div className="alert alert-danger" style={{ borderRadius: '15px' }}>{dropdownError}</div>}
         {success && <div className="alert alert-success" style={{ borderRadius: '15px' }}>{success}</div>}
         {errors.form && <div className="alert alert-danger" style={{ borderRadius: '15px' }}>{errors.form}</div>}
         
