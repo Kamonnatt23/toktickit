@@ -18,4 +18,61 @@ model Category {
   id        Int      @id @default(autoincrement())
   name      String   @unique
   createdAt DateTime @default(now())
+  tickets   Ticket[]
+}
+
+// ---------------------------------------------------------------------------
+// Lab 2 — Development Requester Context
+// ---------------------------------------------------------------------------
+
+model RequesterUser {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  isActive  Boolean  @default(true)
+  role      String   @default("Requester")
+  createdAt DateTime @default(now())
+  tickets   Ticket[]
+}
+
+// ---------------------------------------------------------------------------
+// Issue 3 — Create Ticket models
+// ---------------------------------------------------------------------------
+
+model RelatedSystem {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  tickets   Ticket[]
+}
+
+model Ticket {
+  id              Int           @id @default(autoincrement())
+  categoryId      Int
+  relatedSystemId Int
+  summary         String
+  priority        String        @default("Medium") // e.g., Low, Medium, High, Critical
+  description     String
+  status          String        @default("New")
+  requesterId     Int
+  createdAt       DateTime      @default(now())
+
+  category        Category      @relation(fields: [categoryId], references: [id])
+  relatedSystem   RelatedSystem @relation(fields: [relatedSystemId], references: [id])
+  requester       RequesterUser @relation(fields: [requesterId], references: [id])
+  attachments     Attachment[]
+}
+
+model Attachment {
+  id            Int      @id @default(autoincrement())
+  ticketId      Int
+  fileName      String
+  fileType      String
+  fileSize      Int
+  filePath      String
+  isDeleted     Boolean  @default(false)
+  removalReason String?
+  createdAt     DateTime @default(now())
+
+  ticket        Ticket   @relation(fields: [ticketId], references: [id])
 }

@@ -1,0 +1,139 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import App from "../../src/App.js";
+import * as api from "../../src/api.js";
+
+describe("App", () => {
+  beforeEach(() => {
+    localStorage.setItem('dev_requester_user', JSON.stringify({ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }));
+    
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes('/api/dev/users')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }]) });
+      }
+      return Promise.reject(new Error('Not Found'));
+    }) as any;
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the TokTickIT heading", async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/TokTickIT/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders navigation buttons exactly once to prevent duplication", async () => {
+    render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
+    
+    // Assert exactly ONE of each navigation button is in the DOM
+    const checkSystemBtns = screen.getAllByRole("button", { name: /Check System/i });
+    expect(checkSystemBtns).toHaveLength(1);
+
+    const createTicketBtns = screen.getAllByRole("button", { name: /^Create Ticket$/i });
+    expect(createTicketBtns).toHaveLength(1);
+
+    const myTicketsBtns = screen.getAllByRole("button", { name: /^My Tickets$/i });
+    expect(myTicketsBtns).toHaveLength(1);
+  });
+
+  it("shows Online and the seeded categories on success", async () => {
+    vi.spyOn(api, "checkSystem").mockResolvedValue({
+      online: true,
+      categories: [
+        { id: 1, name: "Account and Access" },
+        { id: 2, name: "Hardware" },
+        { id: 3, name: "Software" },
+        { id: 4, name: "Network" }
+      ]
+    });
+    
+    render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
+    const btn = screen.getByRole("button", { name: /Check System/i });
+    await userEvent.click(btn);
+    
+    await waitFor(() => {
+      expect(screen.getByText(/System Status: Online/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Supported Request Categories:")).toBeInTheDocument();
+    expect(screen.getAllByText("Account and Access")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("Hardware")[0]).toBeInTheDocument();
+  });
+
+  it("shows an Offline error message when the API is unavailable", async () => {
+    vi.spyOn(api, "checkSystem").mockRejectedValue(new Error("Unable to connect to TokTickIT API"));
+    
+    render(<App />);
+    
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Check System/i })).toBeInTheDocument();
+    });
+    const btn = screen.getByRole("button", { name: /Check System/i });
+    await userEvent.click(btn);
+    
+    await waitFor(() => {
+      expect(screen.getByText(/System Status: Offline/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Unable to connect to TokTickIT API")).toBeInTheDocument();
+  });
+
+  it("navigates to ticket detail when a ticket is clicked in My Tickets list", async () => {
+    // Mock the tickets API response
+    const mockTickets = [
+      { id: 99, ticketNumber: 'TKT-099', summary: 'Click me to view details', status: 'New', priority: 'High', createdAt: '2023-01-01T00:00:00.000Z', category: { name: 'Hardware' }, relatedSystem: { name: 'ERP' } }
+    ];
+    
+    const mockTicketDetail = { ...mockTickets[0], description: 'Detailed description for ticket 99' };
+    
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes('/api/dev/users')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: 1, name: 'Alice Smith', email: 'alice@example.com', role: 'Requester' }]) });
+      }
+      if (url.endsWith('/api/tickets/99')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTicketDetail) });
+      }
+      if (url.includes('/api/tickets')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: mockTickets, pagination: { total: 1, totalPages: 1 } }) });
+      }
+      return Promise.reject(new Error('Not Found'));
+    }) as any;
+
+    render(<App />);
+    
+    // Switch to "My Tickets" tab
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^My Tickets$/i })).toBeInTheDocument();
+    });
+    const myTicketsBtn = screen.getByRole("button", { name: /^My Tickets$/i });
+    await userEvent.click(myTicketsBtn);
+    
+    // Wait for the ticket to render
+    await waitFor(() => {
+      expect(screen.getByText('Click me to view details')).toBeInTheDocument();
+    });
+
+    // Click the ticket row (it has the text 'Click me to view details' inside it, so we can click that)
+    const ticketSummary = screen.getByText('Click me to view details');
+    await userEvent.click(ticketSummary);
+
+    // Verify it navigates to TicketDetail by looking for the "Ticket Details" header and specific description
+    await waitFor(() => {
+      expect(screen.getByText('Ticket Details')).toBeInTheDocument();
+      expect(screen.getByText('Detailed description for ticket 99')).toBeInTheDocument();
+      expect(screen.getByText('← Back to My Tickets')).toBeInTheDocument();
+    });
+  });
+});
