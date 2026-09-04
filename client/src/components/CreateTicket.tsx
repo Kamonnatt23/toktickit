@@ -139,7 +139,7 @@ export function CreateTicket() {
   return (
     <div className="card shadow-sm border-0 mt-4" style={{ backgroundColor: '#fdfaf6', borderRadius: '20px', overflow: 'hidden' }}>
       <div className="card-header text-white border-0" style={{ backgroundColor: '#006B3C', padding: '1.5rem' }}>
-        <h2 className="h4 mb-0 text-center">Create New IT Request</h2>
+        <h2 className="h4 mb-0 text-center">Create New Ticket</h2>
       </div>
       <div className="card-body p-4 p-md-5">
         {dropdownError && <div className="alert alert-danger" style={{ borderRadius: '15px' }}>{dropdownError}</div>}

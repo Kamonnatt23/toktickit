@@ -36,14 +36,14 @@ describe('CreateTicket Form', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+      expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
     });
 
     expect(screen.getByLabelText(/Category/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Related System/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Summary/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Description/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Submit Request/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Submit Ticket/i })).toBeInTheDocument();
   });
 
   it('shows validation errors when submitting empty form', async () => {
@@ -54,10 +54,10 @@ describe('CreateTicket Form', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+      expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
     });
 
-    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    const submitBtn = screen.getByRole('button', { name: /Submit Ticket/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
@@ -76,7 +76,7 @@ describe('CreateTicket Form', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+      expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText(/Category/), { target: { value: '1' } });
@@ -84,7 +84,7 @@ describe('CreateTicket Form', () => {
     fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'My issue' } });
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'It is broken' } });
 
-    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    const submitBtn = screen.getByRole('button', { name: /Submit Ticket/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
@@ -100,7 +100,7 @@ describe('CreateTicket Form', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+      expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText(/Category/), { target: { value: '1' } });
@@ -108,7 +108,7 @@ describe('CreateTicket Form', () => {
     fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'A'.repeat(100) } });
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'B'.repeat(1000) } });
 
-    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    const submitBtn = screen.getByRole('button', { name: /Submit Ticket/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
@@ -124,7 +124,7 @@ describe('CreateTicket Form', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Create New IT Request')).toBeInTheDocument();
+      expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByLabelText(/Category/), { target: { value: '1' } });
@@ -132,7 +132,7 @@ describe('CreateTicket Form', () => {
     fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'A'.repeat(101) } });
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'B'.repeat(1001) } });
 
-    const submitBtn = screen.getByRole('button', { name: /Submit Request/i });
+    const submitBtn = screen.getByRole('button', { name: /Submit Ticket/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
