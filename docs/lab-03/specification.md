@@ -123,7 +123,7 @@ The UI extends Lab 2's "Zen Green" design language.
 
 ## 7. Data Changes
 The Prisma schema requires the following updates:
-1.  **User Model:** Migrate `RequesterUser` to a universal `User` model, adding password hash, `requiresPasswordChange` flag, and enforcing role constraints.
+1.  **User Model:** Migrate the conceptual identity to a universal `User` model by mapping it directly to the physical `RequesterUser` table using `@@map("RequesterUser")`. This intentionally reuses the populated Lab 2 table to preserve existing data and relations. We add `passwordHash`, `requiresPasswordChange` flag, and enforce role constraints.
 2.  **Session Model:** A model to store stateful backend sessions (e.g., `Session` table storing a hashed session token, userId, and lastActiveAt).
 3.  **Ticket Model:** Add `ownerId` (relation to `User`), `itPriority`, and expand the `status` enum.
 4.  **Communication Models:** Create new models for `PublicComment` and `InternalNote`, linked to a `Ticket` and an author `User`.
@@ -177,3 +177,4 @@ The API will transition to enforce authentication via stateful session cookies.
 *   **Decision - Safe Error Policy:** `401` covers all login failures generically. `404 Not Found` enforces non-enumeration for unowned specific resources. `403 Forbidden` enforces endpoint-level role denial.
 *   **Decision - "Appears Resolved" Behavior:** The "Appears Resolved" action merely appends a standardized Public Comment and is permitted strictly when the ticket is `In Progress`. Formal status resolution remains firmly with IT Staff.
 *   **Decision - Requester Automatic Status Transitions:** If a ticket is `Waiting for Requester`, a new comment from the Requester automatically transitions it to `Open`. If `Resolved` or `Closed`, the mere submission of a comment automatically transitions it to `Reopened`.
+*   **Decision - Existing User Credentials:** During migration, all existing Lab 2 users are assigned a safe, valid bcrypt hash for "password123" and `requiresPasswordChange = true`. This prevents lockouts for unseeded users while maintaining strict password hashing compliance. Seeded credentials remain for local development only.

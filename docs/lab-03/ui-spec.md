@@ -85,7 +85,7 @@
 ## 7. Administrator User Management
 *   **Purpose:** Minimalist interface to manage accounts.
 *   **Access:** Administrator strictly.
-*   **Main Layout:** Data table of users (Name, Email, Role, Status).
+*   **Main Layout:** Data table of users (Name, Email, Role, Account State (isActive)).
 *   **Controls:** Search bar, Filter by Role, "Add User" button. Action buttons per row (Edit).
 *   **Edit/Create Modal (or Slide-out):**
     *   Fields: Name, Email, Role (Dropdown: Requester, IT Staff, Administrator), Is Active (Toggle), Initial Password (only visible on creation or manual reset).
