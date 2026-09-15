@@ -9,6 +9,8 @@ const prisma = new PrismaClient();
 describe('Lab 3 Authentication & Session API', () => {
   let activeUser: any;
   let inactiveUser: any;
+  let originalPasswordHash: string;
+  let originalRequiresPasswordChange: boolean;
   let testPassword = 'password123';
   let validCookie: string;
 
@@ -17,6 +19,10 @@ describe('Lab 3 Authentication & Session API', () => {
     activeUser = await prisma.user.findFirst({ where: { email: 'john@example.com' } });
     inactiveUser = await prisma.user.findFirst({ where: { email: 'inactive.req@example.com' } });
     
+    // Save original state for restoration
+    originalPasswordHash = activeUser.passwordHash;
+    originalRequiresPasswordChange = activeUser.requiresPasswordChange;
+
     // Ensure John has password123 and requires password change
     testPassword = 'password123';
     const hash = await authService.hashPassword(testPassword);
@@ -27,6 +33,28 @@ describe('Lab 3 Authentication & Session API', () => {
   });
 
   afterAll(async () => {
+    // Restore the seeded user's original state
+    if (activeUser) {
+      await prisma.user.update({
+        where: { id: activeUser.id },
+        data: {
+          passwordHash: originalPasswordHash,
+          requiresPasswordChange: originalRequiresPasswordChange
+        }
+      });
+
+      // Cleanup any test-created sessions for this user
+      await prisma.session.deleteMany({
+        where: { userId: activeUser.id }
+      });
+    }
+
+    if (inactiveUser) {
+      await prisma.session.deleteMany({
+        where: { userId: inactiveUser.id }
+      });
+    }
+
     await prisma.$disconnect();
   });
 
