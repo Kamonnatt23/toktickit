@@ -109,5 +109,42 @@ describe('Lab 3 Database Schema & Seed Verification', () => {
       expect(note.authorId).toBeDefined();
       expect(note.ticketId).toBe(ticket!.id);
     });
+
+    it('preserves existing Lab 2 Attachments and maintains their relationships', async () => {
+      // Find an existing legacy Lab 2 attachment
+      const existingAttachment = await prisma.attachment.findFirst({
+        where: {
+          // ensure we're looking at legacy data (created before migration)
+          createdAt: {
+            lt: new Date('2026-09-15T00:00:00.000Z')
+          }
+        },
+        include: { ticket: true }
+      });
+
+      // Assert that legacy attachments survived the migration
+      expect(existingAttachment).toBeDefined();
+      expect(existingAttachment!.id).toBeGreaterThan(0);
+      
+      // Verify important metadata survived and remains untouched
+      expect(existingAttachment!.fileName).toBeDefined();
+      expect(existingAttachment!.fileType).toBeDefined();
+      expect(existingAttachment!.fileSize).toBeGreaterThan(0);
+      expect(existingAttachment!.filePath).toBeDefined();
+
+      // Verify the Ticket <-> Attachment relationship is perfectly preserved
+      expect(existingAttachment!.ticketId).toBeDefined();
+      expect(existingAttachment!.ticket).toBeDefined();
+      expect(existingAttachment!.ticket.id).toBe(existingAttachment!.ticketId);
+      
+      // Verify the ticket's relations also still point back correctly
+      const ticketWithAttachments = await prisma.ticket.findUnique({
+        where: { id: existingAttachment!.ticketId },
+        include: { attachments: true }
+      });
+      
+      const foundInTicket = ticketWithAttachments!.attachments.find(a => a.id === existingAttachment!.id);
+      expect(foundInTicket).toBeDefined();
+    });
   });
 });

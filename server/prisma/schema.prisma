@@ -18,7 +18,8 @@ model User {
   id                     Int       @id @default(autoincrement())
   name                   String
   email                  String    @unique
-  passwordHash           String    @default("") // Handled in migration/seed for existing users
+  // Default hash is 'password123' so unseeded Lab 2 users can login.
+  passwordHash           String    @default("$2b$10$gumpaF8EQG4qN4/WfnJtduwsgZHRiaeZL292zSI1OMF3YDXB0c/ta") 
   role                   String    @default("Requester") // Requester, IT Staff, Administrator
   isActive               Boolean   @default(true)
   requiresPasswordChange Boolean   @default(true)
@@ -32,6 +33,8 @@ model User {
   publicComments         PublicComment[]
   internalNotes          InternalNote[]
 
+  // Prisma model is named User, physical PostgreSQL table remains "RequesterUser"
+  // This is intentional to reuse the populated Lab 2 table and preserve existing data/relations.
   @@map("RequesterUser")
 }
 

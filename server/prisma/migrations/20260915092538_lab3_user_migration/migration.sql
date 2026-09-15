@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE "RequesterUser" ADD COLUMN     "passwordHash" TEXT NOT NULL DEFAULT '',
+ALTER TABLE "RequesterUser" ADD COLUMN     "passwordHash" TEXT NOT NULL DEFAULT '$2b$10$gumpaF8EQG4qN4/WfnJtduwsgZHRiaeZL292zSI1OMF3YDXB0c/ta',
 ADD COLUMN     "requiresPasswordChange" BOOLEAN NOT NULL DEFAULT true,
 ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
