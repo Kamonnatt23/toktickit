@@ -67,22 +67,23 @@ Stakeholders require the application to transition from the Lab 2 "Development R
 | View Staff Queue                     | Deny            | Deny          | Allow    | Allow         |
 | Claim / Assign / Reassign            | Deny            | Deny          | Allow    | Deny          |
 | Update IT Priority & Status          | Deny            | Deny          | Allow    | Deny          |
-| User Management (List/Create/Edit)   | Deny            | Deny          | Deny     | Allow         |
+| User Management                      | Deny            | Deny          | Deny     | Allow         |
 
 ### 5.3 Ticket Ownership & Priorities
-*   **BR-04 [Ticket Owner]:** A Ticket may have zero or one primary owner. The owner must be an active IT Staff.
+*   **BR-04 [Ticket Owner]:** A Ticket may have zero or one primary owner. The assigned owner must be a user with an active IT Staff role.
 *   **BR-05 [IT Priority]:** Upon ticket creation, IT Priority is initially a copy of the Requested Priority. Later, only IT Staff can change it.
 
 ### 5.4 Comments and Notes
 *   **BR-06 [Append-Only Communication]:** Public Comments and Internal Notes are append-only. They cannot be edited or deleted.
 *   **BR-07 [Content Validation]:** Empty or whitespace-only content for comments and notes must be rejected. The system must enforce a 2000-character limit and render safely.
 *   **BR-08 [Author Trust]:** The author ID and creation timestamp must be securely determined by the backend from the authenticated session.
-*   **BR-09 [Problem Appears Resolved]:** When a Requester indicates a problem "appears resolved", the system records this solely by generating a standardized Public Comment authored by the Requester (e.g., "The Requester indicates that the problem appears resolved."). It does NOT change the ticket status. Formal resolution remains strictly an IT Staff responsibility.
+*   **BR-09 [Problem Appears Resolved]:** When a Requester indicates a problem "appears resolved", the system records this solely by generating a standardized Public Comment authored by the Requester. It does NOT change the ticket status. Formal resolution remains strictly an IT Staff responsibility.
+*   **BR-10 [Appears Resolved Condition]:** The "Appears Resolved" action is strictly allowed ONLY when the Ticket status is `In Progress`. Any API attempt to trigger this action on a ticket in a different status must be rejected.
 
 ### 5.5 Administrator Safety Rules
-*   **BR-10 [Unique Email]:** User email addresses must be unique across the system.
-*   **BR-11 [Self-Deactivation]:** An Administrator cannot deactivate their own account.
-*   **BR-12 [Last Admin]:** The system must not allow the deactivation or role change of the last active Administrator.
+*   **BR-11 [Unique Email]:** User email addresses must be unique across the system.
+*   **BR-12 [Self-Deactivation]:** An Administrator cannot deactivate their own account.
+*   **BR-13 [Last Admin]:** The system must not allow the deactivation or role change of the last active Administrator.
 
 ### 5.6 Status Transition Matrix
 
@@ -96,7 +97,7 @@ Stakeholders require the application to transition from the Lab 2 "Development R
 | Waiting for Requester | Open, In Progress   | IT Staff          | Staff resumes work                                        |
 | In Progress           | Resolved            | IT Staff          | Must provide resolution details (Public Comment)          |
 | Resolved              | Closed              | IT Staff          | Final confirmation that issue is permanently fixed        |
-| Resolved, Closed      | Reopened            | Requester         | Automatically transitions when Requester adds a comment indicating issue persists |
+| Resolved, Closed      | Reopened            | Requester         | The mere submission of a Public Comment by the Requester on a Resolved or Closed ticket constitutes the explicit condition that automatically transitions the status to Reopened. No NLP is performed. |
 | Closed                | Reopened            | IT Staff          | Only in exceptional cases                                 |
 | *Any (Invalid)*       | *Any*               | *Any*             | Invalid transitions must be rejected safely by the API    |
 
@@ -104,7 +105,7 @@ Stakeholders require the application to transition from the Lab 2 "Development R
 The API enforces a strict, consistent error reporting policy to prevent data leakage and ID enumeration:
 *   **401 Unauthenticated:** Missing, invalid, or expired session. Login attempts with unknown email, invalid password, or inactive account return a generic 401 ("Invalid credentials or account inactive") without revealing if the email exists.
 *   **403 Forbidden:** Authenticated, but lacks the role for the endpoint entirely (e.g., Requester calling `/api/staff/tickets`, or Admin calling `PATCH /api/staff/tickets/:id/assign`).
-*   **404 Not Found:** The resource does not exist, OR the user is requesting an ownership-protected resource (Ticket, Attachment) they do not own or lack permission to see. (Non-enumeration policy).
+*   **404 Not Found:** The resource does not exist, OR the user is requesting an ownership-protected resource (Ticket, Attachment, Note) they do not own or lack permission to see. (Non-enumeration policy).
 *   **400 Bad Request:** Validation failure or invalid request shape.
 *   **409 Conflict:** Resource state conflict (e.g., duplicate email address).
 *   **500 Internal Server Error:** Unexpected server-side failure.
@@ -113,7 +114,7 @@ The API enforces a strict, consistent error reporting policy to prevent data lea
 The UI extends Lab 2's "Zen Green" design language. 
 *   **Global Shell:** Role-based navigation is enforced. The "Development Requester" selector is removed. A user profile/logout menu is added.
 *   **Login & Password Change:** Clean, centralized forms with safe, non-revealing error states for auth failures.
-*   **Requester View:** Preserves Lab 2, dynamically driven by session. Ticket Detail adds Public Comments and an "Appears Resolved" button (which merely submits a predefined comment).
+*   **Requester View:** Preserves Lab 2, dynamically driven by session. Ticket Detail adds Public Comments and an "Appears Resolved" button (only visible/enabled when status is `In Progress`, which merely submits a predefined comment).
 *   **IT Staff Queue:** Robust data table supporting search, filter, sort, and pagination. 
 *   **IT Staff Ticket Detail:** Comprehensive view for Staff to claim, update status/priority, and toggle between Public Comments and Internal Notes.
 *   **Administrator Views:** Read-only access to the Staff Queue and Ticket Details. A separate robust interface for User Management (List, Add, Edit users).
@@ -123,7 +124,7 @@ The UI extends Lab 2's "Zen Green" design language.
 ## 7. Data Changes
 The Prisma schema requires the following updates:
 1.  **User Model:** Migrate `RequesterUser` to a universal `User` model, adding password hash, `requiresPasswordChange` flag, and enforcing role constraints.
-2.  **Session Model:** A model to store stateful backend sessions (e.g., `Session` table with token hash, userId, and lastActiveAt).
+2.  **Session Model:** A model to store stateful backend sessions (e.g., `Session` table storing a hashed session token, userId, and lastActiveAt).
 3.  **Ticket Model:** Add `ownerId` (relation to `User`), `itPriority`, and expand the `status` enum.
 4.  **Communication Models:** Create new models for `PublicComment` and `InternalNote`, linked to a `Ticket` and an author `User`.
 
@@ -133,6 +134,7 @@ The API will transition to enforce authentication via stateful session cookies.
 *   **Ticket Endpoints:** Infer user identity from session. Protect data ownership boundaries with 404s.
 *   **Queue Endpoints:** `/api/staff/tickets` (Staff, Admin).
 *   **Comments/Notes Endpoints:** Append-only structure, enforcing Internal Notes isolation.
+*   **Attachment Endpoints:** Strict ownership rules.
 *   **Admin Endpoints:** `/api/admin/users` for List, Create, Edit, Activate/Deactivate, and Reset Initial Password (Admin only).
 
 *(Detailed in api-spec.md)*
@@ -146,21 +148,22 @@ The API will transition to enforce authentication via stateful session cookies.
 *   **AC-05 [Requester Data Isolation]:** Given a Requester, attempting to access or modify a ticket belonging to someone else returns a 404 Not Found to prevent enumeration.
 *   **AC-06 [Internal Note Protection]:** Given a Requester, attempting to read or create an Internal Note returns a 404 Not Found or 403 Forbidden.
 *   **AC-07 [Staff Queue]:** Given an IT Staff member (or Admin), they can view the queue, search, filter, sort, and paginate.
-*   **AC-08 [Ticket Assignment]:** Given an IT Staff member, they can claim an unassigned ticket or assign it to another active IT Staff. Administrator attempting this receives 403.
+*   **AC-08 [Ticket Assignment]:** Given an IT Staff member, they can claim an unassigned ticket or assign it to another active IT Staff. Assignment to an inactive user or non-Staff user returns 400 Bad Request. Administrator attempting to assign receives 403 Forbidden.
 *   **AC-09 [Status Transitions]:** Any state change must strictly follow the defined Status Transition Matrix; invalid attempts return a 400 Bad Request.
-*   **AC-10 [Requester Automatic Transitions]:** Given a ticket in `Waiting for Requester`, `Resolved`, or `Closed`, a Requester posting a Public Comment automatically transitions the status back to `Open` or `Reopened`.
-*   **AC-11 [Append-Only Comments/Notes]:** Attempting to edit or delete a Public Comment or Internal Note returns 404 or 403. Administrator attempting to create a comment or note receives 403.
-*   **AC-12 [Appears Resolved]:** Given a Requester triggering "Appears Resolved", the system successfully appends a standardized Public Comment without changing the ticket status.
+*   **AC-10 [Requester Automatic Transitions]:** Given a ticket in `Waiting for Requester`, `Resolved`, or `Closed`, a Requester posting a Public Comment automatically transitions the status back to `Open` or `Reopened` respectively.
+*   **AC-11 [Append-Only Comments/Notes]:** Attempting to edit or delete a Public Comment or Internal Note returns 404 or 403. Administrator attempting to create a comment or note receives 403 Forbidden.
+*   **AC-12 [Appears Resolved]:** Given a ticket in `In Progress`, a Requester triggering "Appears Resolved" appends a standardized Public Comment without changing ticket status. Triggering this on any other status returns 400 Bad Request.
 *   **AC-13 [Admin - Unique Email]:** Administrator creating a user with an existing email returns a 409 Conflict.
 *   **AC-14 [Admin - Self-Deactivation Protection]:** Administrator attempting to deactivate their own account receives a 400 Bad Request.
-*   **AC-15 [Admin - Last Admin Protection]:** Attempting to change role/deactivate the last active Administrator receives a 400 Bad Request.
+*   **AC-15 [Admin - Last Admin Protection]:** Attempting to change role or deactivate the last active Administrator receives a 400 Bad Request.
 *   **AC-16 [Regression & Migration]:** Existing Lab 2 Tickets and Attachments remain intact and successfully migrate to the new schema structures.
+*   **AC-17 [Responsive UI & Accessibility]:** The application shall maintain responsive behavior across desktop, tablet, and mobile (e.g., Staff Queue transforming into a card list on mobile) and pass basic accessibility checks.
 
 ## 10. Product Definition of Done
 1.  The approved specification (this document, API spec, UI spec, Test plan) is complete and reviewed.
 2.  All ACs, Functional Requirements, and Business Rules are traceable to the test plan.
 3.  Database migration perfectly preserves Lab 2 Ticket and Attachment data.
-4.  Authentication is secure (passwords hashed, stateful sessions, safe error feedback).
+4.  Authentication is secure (`bcrypt` for passwords, stateful server sessions, safe error feedback).
 5.  Authorization is enforced strictly on the backend following the explicit error policy (401/403/404).
 6.  Requester ownership boundaries are thoroughly protected using non-enumeration (404) practices.
 7.  Staff workflow rules and Admin safety rules are implemented and validated.
@@ -168,9 +171,9 @@ The API will transition to enforce authentication via stateful session cookies.
 9.  All tests mapped in `tests.md` are passing locally and in CI.
 
 ## 11. Assumptions and Decisions
-*   **Decision - Authentication Strategy:** A true stateful backend session (stored in DB/Memory) will be used to correctly support a sliding 24-hour inactivity expiration and immediate true invalidation on logout. The session ID will be stored in an `HttpOnly`, `Strict` cookie.
-*   **Decision - Password Hashing:** bcrypt or Argon2 will be used.
+*   **Decision - Authentication Strategy:** A true stateful backend session is used. The server generates a secure random session token, stores its hash in the database alongside `userId` and `lastActiveAt`, and sends the raw token to the client in an `HttpOnly`, `Strict` cookie. This supports a sliding 24-hour inactivity expiration and immediate true invalidation on logout.
+*   **Decision - Password Hashing:** `bcrypt` (with a salt factor of 10) is chosen as the exclusive hashing algorithm for consistent implementation.
 *   **Decision - Administrator Scope:** Administrator handles User Management and has READ-ONLY access to tickets, comments, and notes. They do not possess IT Staff operational privileges (no claiming, status updates, or posting comments/notes).
 *   **Decision - Safe Error Policy:** `401` covers all login failures generically. `404 Not Found` enforces non-enumeration for unowned specific resources. `403 Forbidden` enforces endpoint-level role denial.
-*   **Decision - "Appears Resolved" Behavior:** The "Appears Resolved" action merely appends a standardized Public Comment. Formal status resolution remains firmly with IT Staff.
-*   **Decision - Requester Automatic Status Transitions:** If a ticket is `Waiting for Requester`, a new comment from the Requester automatically transitions it to `Open`. If `Resolved` or `Closed`, it transitions to `Reopened`.
+*   **Decision - "Appears Resolved" Behavior:** The "Appears Resolved" action merely appends a standardized Public Comment and is permitted strictly when the ticket is `In Progress`. Formal status resolution remains firmly with IT Staff.
+*   **Decision - Requester Automatic Status Transitions:** If a ticket is `Waiting for Requester`, a new comment from the Requester automatically transitions it to `Open`. If `Resolved` or `Closed`, the mere submission of a comment automatically transitions it to `Reopened`.

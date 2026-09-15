@@ -1,11 +1,11 @@
 # Lab 3 API Specification
 
 ## 1. Authentication Design
-*   **Password Hashing Approach:** Passwords will be hashed using `bcrypt` (minimum salt factor 10) before storage. Plaintext passwords will never be stored or logged.
-*   **Session Approach:** The API will use stateful server-side sessions. A securely generated session ID will be stored in the database alongside a `lastActiveAt` timestamp.
-*   **Storage Behavior:** The session ID will be sent to the client via an `HttpOnly`, `Secure` (in production), and `SameSite=Strict` cookie to prevent Cross-Site Scripting (XSS) extraction.
+*   **Password Hashing Approach:** Passwords will be strictly hashed using `bcrypt` (minimum salt factor 10) before storage. Plaintext passwords will never be stored or logged.
+*   **Session Approach:** The API will use stateful server-side sessions. The server generates a secure random session token. The *hash* of this token is stored in the database alongside a `userId` and `lastActiveAt` timestamp.
+*   **Storage Behavior:** The raw session token is sent to the client via an `HttpOnly`, `Secure` (in production), and `SameSite=Strict` cookie to prevent Cross-Site Scripting (XSS) extraction.
 *   **Expiration:** Sessions will expire after 24 hours of inactivity. The backend will validate and extend the `lastActiveAt` timestamp on incoming requests.
-*   **Logout Invalidation:** The `/api/auth/logout` endpoint will definitively destroy the session record in the database *and* clear the cookie from the client.
+*   **Logout Invalidation:** The `/api/auth/logout` endpoint will definitively destroy the session hash record in the database *and* clear the cookie from the client.
 *   **CSRF Considerations:** Because `SameSite=Strict` is used, cross-site request forgery is heavily mitigated.
 *   **Safe Error Behavior (Explicit Policy):**
     *   **401 Unauthenticated:** Missing, invalid, or expired session. Login attempts with unknown email, invalid password, or inactive account return a generic 401 ("Invalid credentials or account inactive") without revealing if the email exists.
@@ -14,7 +14,7 @@
     *   **400 Bad Request:** Validation failure, invalid transition, or invalid request shape.
     *   **409 Conflict:** Resource state conflict (e.g., duplicate email address).
     *   **500 Internal Server Error:** Unexpected backend failure.
-*   **Secret Handling:** Session signing secrets and database connection strings will be managed securely via environment variables.
+*   **Secret Handling:** Database connection strings will be managed securely via environment variables.
 
 ## 2. Queue Query Behavior (Staff Queue)
 *   **Searchable Fields:** Ticket ID (exact match on numeric part) and Summary (case-insensitive partial match).
@@ -34,7 +34,7 @@
 *   **Auth Requirement:** None.
 *   **Request Shape:** `{ "email": "user@example.com", "password": "securepassword" }`
 *   **Response Shape:** `{ "id": 1, "email": "user@example.com", "role": "Requester", "requiresPasswordChange": false }`
-*   **Success Status:** `200 OK` (with `Set-Cookie` header).
+*   **Success Status:** `200 OK` (with `Set-Cookie` header containing raw token).
 *   **Errors:** `400` (missing fields), `401` (invalid credentials or inactive account, without revealing email existence), `500` (unexpected error).
 
 #### POST `/api/auth/logout`
@@ -104,7 +104,7 @@
 *   **Permitted Roles:** IT Staff. (Administrators denied).
 *   **Request Shape:** `{ "ownerId": 5 }` (Send null to unassign).
 *   **Success Status:** `200 OK`.
-*   **Errors:** `400` (invalid owner ID), `403` (forbidden for Requesters/Admins), `404` (not found).
+*   **Errors:** `400` (invalid owner ID, owner not active IT Staff), `403` (forbidden for Requesters/Admins), `404` (not found).
 
 #### PATCH `/api/staff/tickets/:id/status`
 *   **Purpose:** Update ticket status (and IT Priority).
@@ -124,7 +124,7 @@
 *   **Errors:** `404` (not found or unowned ticket).
 
 #### POST `/api/tickets/:id/comments`
-*   **Purpose:** Create a public comment. If Ticket is `Waiting for Requester` / `Resolved` / `Closed` and author is Requester, auto-transitions Ticket status.
+*   **Purpose:** Create a public comment. If Ticket is `Waiting for Requester`, auto-transitions Ticket status to `Open`. If Ticket is `Resolved` or `Closed`, the mere submission of a comment automatically transitions it to `Reopened`.
 *   **Auth Requirement:** Required.
 *   **Permitted Roles:** Requester (own tickets only), IT Staff. (Administrators denied).
 *   **Request Shape:** `{ "content": "Did you try turning it off?" }`
@@ -137,7 +137,7 @@
 *   **Permitted Roles:** Requester (own tickets only).
 *   **Request Shape:** `{}` (empty body).
 *   **Success Status:** `201 Created` (returns the generated comment).
-*   **Errors:** `403` (forbidden), `404` (unowned/not found).
+*   **Errors:** `400` (ticket is not strictly `In Progress`), `403` (forbidden), `404` (unowned/not found).
 
 #### GET `/api/tickets/:id/notes`
 *   **Purpose:** Fetch internal notes.
@@ -156,11 +156,43 @@
 
 ### 3.5 Attachments
 
-*   `POST /api/attachments`
-*   `GET /api/attachments/:id`
-*   `GET /api/attachments/:id/download`
-*   `DELETE /api/attachments/:id`
-*   **Error Policy:** `404 Not Found` if the attachment does not exist OR if it belongs to a ticket the user does not own (non-enumeration).
+#### POST `/api/attachments`
+*   **Purpose:** Upload a new attachment and optionally link it to a ticket.
+*   **Auth Requirement:** Required.
+*   **Permitted Roles:** Requester (own tickets only), IT Staff. (Administrators denied from uploading).
+*   **Ownership Rule:** If a `ticketId` is provided, the user must be IT Staff or the Requester who owns the ticket.
+*   **Request Shape:** `multipart/form-data` with `file` and optional `ticketId`.
+*   **Response Shape:** Created attachment object (metadata only).
+*   **Success Status:** `201 Created`.
+*   **Errors:** `400` (invalid file type/size, too many attachments), `403` (Admin upload attempt), `404` (ticket not found / unowned non-enumeration).
+
+#### GET `/api/attachments/:id`
+*   **Purpose:** Fetch metadata for a specific attachment.
+*   **Auth Requirement:** Required.
+*   **Permitted Roles:** Requester, IT Staff, Administrator.
+*   **Ownership Rule:** If linked to a ticket, Requester must own the ticket. IT Staff/Admin can view all.
+*   **Response Shape:** Attachment metadata object.
+*   **Success Status:** `200 OK`.
+*   **Errors:** `404` (attachment not found, or linked ticket unowned by Requester - non-enumeration).
+
+#### GET `/api/attachments/:id/download`
+*   **Purpose:** Download the raw file contents of an attachment.
+*   **Auth Requirement:** Required.
+*   **Permitted Roles:** Requester, IT Staff, Administrator.
+*   **Ownership Rule:** Same as metadata (Requester must own the associated ticket).
+*   **Response Shape:** Raw file stream (e.g., `image/jpeg`, `application/pdf`).
+*   **Success Status:** `200 OK` (with `Content-Disposition: attachment`).
+*   **Errors:** `404` (file not found on disk, or attachment/ticket not found/unowned).
+
+#### DELETE `/api/attachments/:id`
+*   **Purpose:** Soft-delete an attachment and record the removal reason.
+*   **Auth Requirement:** Required.
+*   **Permitted Roles:** Requester (own tickets only), IT Staff. (Administrators denied).
+*   **Ownership Rule:** Requester can only delete attachments linked to their own ticket.
+*   **Request Shape:** `{ "removalReason": "Uploaded wrong file" }`
+*   **Response Shape:** Empty.
+*   **Success Status:** `204 No Content`.
+*   **Errors:** `400` (missing reason), `403` (Admin attempt), `404` (attachment/ticket not found/unowned).
 
 ### 3.6 Administrator User Management
 

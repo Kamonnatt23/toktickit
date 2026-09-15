@@ -12,7 +12,7 @@
 *   **Responsive:** On mobile, the top navbar collapses into a standard hamburger menu.
 
 ## 2. Login Screen
-*   **Purpose:** Authenticate users into the system via stateful server sessions.
+*   **Purpose:** Authenticate users into the system via stateful server-backed sessions.
 *   **Access:** Unauthenticated users.
 *   **Main Fields:** Email (input type email), Password (input type password).
 *   **Controls:** Login button.
@@ -38,9 +38,9 @@
 *   **Purpose:** Allow requesters to create tickets, view their tickets, and manage attachments.
 *   **Access:** Requester role.
 *   **Main Changes:** 
-    *   The `X-Requester-Id` header is no longer explicitly set by the UI; the backend infers identity from the session.
-    *   **Ticket Detail View:** Added a section for "Public Comments" at the bottom. Requesters can view the comment history and post new ones. Note: Posting a comment on a ticket that is `Waiting for Requester`, `Resolved`, or `Closed` will automatically update its status to `Open` or `Reopened` in the UI upon successful submission.
-    *   **Appears Resolved:** A new action button "Appears Resolved" is visible if the ticket is `In Progress`. Clicking this button triggers the `/api/tickets/:id/appears-resolved` endpoint, generating a standardized comment without actually modifying the Ticket status in the UI or backend.
+    *   The `X-Requester-Id` header is no longer explicitly set by the UI; the backend infers identity from the secure session cookie.
+    *   **Ticket Detail View:** Added a section for "Public Comments" at the bottom. Requesters can view the comment history and post new ones. Note: The mere submission of a comment on a ticket that is `Waiting for Requester`, `Resolved`, or `Closed` will automatically update its status to `Open` or `Reopened` in the UI upon successful submission.
+    *   **Appears Resolved:** A new action button "Appears Resolved" is exclusively visible/enabled ONLY if the ticket status is `In Progress`. Clicking this button triggers the `/api/tickets/:id/appears-resolved` endpoint, generating a standardized comment without actually modifying the Ticket status in the UI or backend.
 *   **States:** 
     *   *Not Found / Forbidden (404):* If a requester tries to directly navigate to a URL of a ticket they do not own, they see a generic "Ticket not found" error page (non-enumeration policy).
     *   *Empty:* Preserved from Lab 2.
