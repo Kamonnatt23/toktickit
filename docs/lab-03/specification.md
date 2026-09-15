@@ -145,7 +145,7 @@ The API will transition to enforce authentication via stateful session cookies.
 *   **AC-02 [Invalid Login]:** Given incorrect credentials or inactive account, returns a generic 401 without revealing if email exists.
 *   **AC-03 [First-Login Password Change]:** Given a user flagged for a password change, blocks access to normal routes until password is changed.
 *   **AC-04 [Logout]:** Clicking logout destroys the session record in the database and clears the cookie.
-*   **AC-05 [Requester Data Isolation]:** Given a Requester, attempting to access or modify a ticket belonging to someone else returns a 404 Not Found to prevent enumeration.
+*   **AC-05 [Requester Data Isolation]:** Given a Requester, attempting to access or modify a ticket or attachment belonging to someone else returns a 404 Not Found to prevent enumeration.
 *   **AC-06 [Internal Note Protection]:** Given a Requester, attempting to read or create an Internal Note returns a 404 Not Found or 403 Forbidden.
 *   **AC-07 [Staff Queue]:** Given an IT Staff member (or Admin), they can view the queue, search, filter, sort, and paginate.
 *   **AC-08 [Ticket Assignment]:** Given an IT Staff member, they can claim an unassigned ticket or assign it to another active IT Staff. Assignment to an inactive user or non-Staff user returns 400 Bad Request. Administrator attempting to assign receives 403 Forbidden.

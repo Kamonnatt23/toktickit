@@ -13,7 +13,7 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **AUTH-04** | API | AC-03, AC-04 | First-login password change & Logout | API blocks normal routes until password changed; logout destroys session DB record and clears cookie | `server/tests/lab-03/auth.api.test.ts` | Planned |
 | **AUTHZ-01**| API | AC-05 | Direct API access to other's ticket (Requester) | 404 Not Found (Non-enumeration policy) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
 | **AUTHZ-02**| API | AC-08 | Administrator attempts to assign a ticket | 403 Forbidden (Admin has READ-ONLY access to tickets) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| **AUTHZ-03**| API | AC-05, AC-06 | Administrator attempts to access Staff Queue | 403 Forbidden (Admin has strict role separation) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
+| **AUTHZ-03**| API | AC-07 | Administrator attempts to view Staff Queue | 200 OK (Admin has READ-ONLY visibility) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
 | **AUTHZ-04**| API | AC-05 | Direct API access to unowned Attachment (Requester) | 404 Not Found (Non-enumeration policy) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
 | **STAFF-01**| API | AC-07 | Staff queue pagination and filtering | Queue returns exact page sizes; filters by status correctly | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
 | **STAFF-02**| API | AC-07 | Staff queue sorting | Validates default sort (date desc) and custom sort (priority asc) | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
@@ -34,7 +34,7 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **ADMIN-02**| API | AC-14 | Admin attempts self-deactivation | 400 Bad Request, operation aborted | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
 | **ADMIN-03**| API | AC-15 | Last active admin deactivation | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
 | **ADMIN-04**| API | AC-15 | Last active admin role change | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| **MIG-01**  | API | AC-16 | Data migration and regression | Verify Lab 2 ticket/attachment endpoints work with session auth | `server/tests/lab-03/authorization.api.test.ts` | Planned |
+| **MIG-01**  | API | AC-16 | Data migration and regression | Verify existing Lab 2 Tickets and Attachments still exist, relationships and ownership remain intact without data loss, and endpoints work with session auth | `server/tests/lab-03/authorization.api.test.ts` | Planned |
 | **UI-01**   | UI Component | AC-01, AC-02 | Login form rendering and validation | Renders properly, validates empty fields, shows error state safely | `client/src/components/Login.test.tsx` | Planned |
 | **UI-02**   | UI Component | AC-03 | Change password form boundaries | Validates matching passwords, loading state during save | `client/src/components/ChangePassword.test.tsx` | Planned |
 | **UI-03**   | UI Component | AC-07 | Staff Ticket Queue table | Renders data, triggers search/sort callbacks | `client/src/components/StaffTicketQueue.test.tsx` | Planned |
