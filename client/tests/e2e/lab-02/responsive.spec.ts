@@ -30,7 +30,7 @@ test.describe('Responsive UI verification', () => {
       await page.waitForSelector('input#summary');
       await checkOverflow(page);
       await expect(page.locator('button:has-text("Submit Ticket")')).toBeVisible();
-      await page.screenshot({ path: `playwright-report/screenshots/Create-Ticket-${vp.name}.png`, fullPage: true });
+      await page.screenshot({ path: `e2e-screenshots/Create-Ticket-${vp.name}.png`, fullPage: true });
 
       // Actually submit it to ensure data exists for next screens
       await page.fill('input#summary', `Responsive test ${vp.name}`);
@@ -47,7 +47,7 @@ test.describe('Responsive UI verification', () => {
       await page.waitForTimeout(500); // let data load
       await checkOverflow(page);
       await expect(page.locator('h2:has-text("My Tickets")')).toBeVisible();
-      await page.screenshot({ path: `playwright-report/screenshots/My-Tickets-${vp.name}.png`, fullPage: true });
+      await page.screenshot({ path: `e2e-screenshots/My-Tickets-${vp.name}.png`, fullPage: true });
 
       // Ticket Detail
       // Wait for ticket card to appear and verify at least one exists
@@ -59,7 +59,7 @@ test.describe('Responsive UI verification', () => {
       await page.waitForSelector('text=Ticket Details');
       await checkOverflow(page);
       await expect(page.locator('text=Ticket Details')).toBeVisible();
-      await page.screenshot({ path: `playwright-report/screenshots/Ticket-Detail-${vp.name}.png`, fullPage: true });
+      await page.screenshot({ path: `e2e-screenshots/Ticket-Detail-${vp.name}.png`, fullPage: true });
     });
   }
 });
