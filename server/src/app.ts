@@ -1,7 +1,17 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { getPrisma } from "./prisma.js";
+import { PrismaClient } from "@prisma/client";
+import cookieParser from "cookie-parser";
+import authRoutes from "./routes/auth.routes.js";
 import attachmentsRouter from "./attachments.js";
+
+let prisma: PrismaClient;
+
+export function getPrisma() {
+  if (!prisma) prisma = new PrismaClient();
+  return prisma;
+}
+
 // getPrisma() is your lazy database handle. Call it INSIDE a route when you
 // need the DB (Issue 4). It is intentionally unused until then.
 void getPrisma;
@@ -10,9 +20,11 @@ void getPrisma;
 // Supertest can import `app` without opening a port. Do not merge these files.
 export const app = express();
 
-app.use(cors());          // already wired: lets the Vite dev server call this API
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use(cookieParser());
 
+app.use("/api/auth", authRoutes);
 app.use("/api/attachments", attachmentsRouter);
 
 app.get("/", (_req: Request, res: Response) => {
