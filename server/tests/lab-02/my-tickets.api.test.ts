@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
@@ -48,7 +48,7 @@ describe('GET /api/tickets', () => {
     //{ where: { id: systemId } });
   });
 
-  it('requires X-Requester-Id header', async () => {
+  it('requires authentication', async () => {
     const res = await request(app).get('/api/tickets');
     expect(res.status).toBe(401);
   });
@@ -61,6 +61,27 @@ describe('GET /api/tickets', () => {
     expect(summaries).not.toContain('Secret ticket');
     expect(res.body.data[0]).toHaveProperty('ticketNumber');
   });
+
+  
+  it('allows IT Staff to view all tickets in queue', async () => {
+    const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+    const staffCookie = await authService.createSession(staffUser.id);
+    const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+    // Should see both 'Fix router' and 'Secret ticket' since they see all
+    const summaries = res.body.data.map((t: any) => t.summary);
+    expect(summaries).toContain('Fix router');
+    expect(summaries).toContain('Secret ticket');
+  });
+
+  it('allows Administrator to view all tickets', async () => {
+    const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+    const adminCookie = await authService.createSession(adminUser.id);
+    const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${adminCookie}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+  });
+
 
   it('filters by status', async () => {
     const res = await request(app).get('/api/tickets?status=In Progress').set("Cookie", `sessionId=${sessionCookie}`);

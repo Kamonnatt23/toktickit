@@ -84,7 +84,11 @@ app.get("/api/related-systems", async (_req: Request, res: Response) => {
 
 app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Administrator') {
+      return res.status(403).json({ error: "Forbidden: Administrators cannot create tickets" });
+    }
+    const requesterId = user.id;
 
     const { categoryId, relatedSystemId, summary, priority, description, attachmentIds } = req.body;
     
@@ -170,7 +174,7 @@ app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promi
 
 app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
+    const user = (req as AuthenticatedRequest).user!;
 
     const { search, status, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
@@ -178,7 +182,11 @@ app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promis
     const limitNum = parseInt(limit as string, 10) || 10;
     const skip = (pageNum - 1) * limitNum;
 
-    const whereClause: any = { requesterId };
+    const whereClause: any = {};
+    if (user.role === 'Requester') {
+      whereClause.requesterId = user.id;
+    }
+    // IT Staff and Admin can view all tickets in the list (Queue view placeholders)
 
     if (status && status !== 'All') {
       whereClause.status = status;
@@ -233,7 +241,7 @@ app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promis
 
 app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
+    const user = (req as AuthenticatedRequest).user!;
     
     const ticketId = parseInt(req.params.id, 10);
     if (isNaN(ticketId)) {
@@ -254,7 +262,7 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
     }
 
     // Ownership check (Crucial scope rule)
-    if (ticket.requesterId !== requesterId) {
+    if (user.role === 'Requester' && ticket.requesterId !== user.id) {
       // Returning 404 for security obscurity or 403. Using 404 is generally better for obscurity, 
       // but standard is 403. Let's return 403 as the prompt says "403 Forbidden (or 404 Not Found)"
       return res.status(403).json({ error: "Forbidden: You do not have permission to access this ticket" });
