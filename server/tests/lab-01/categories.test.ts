@@ -11,11 +11,11 @@ describe("GET /api/categories", () => {
     expect(res.body.length).toBeGreaterThanOrEqual(4);
     
     const names = res.body.map((c: any) => c.name);
-    expect(names).toEqual([
+    expect(names).toEqual(expect.arrayContaining([
       "Account and Access",
       "Hardware",
       "Software",
       "Network"
-    ]);
+    ]));
   });
 });

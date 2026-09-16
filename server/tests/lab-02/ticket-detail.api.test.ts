@@ -2,10 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
+import { authService } from '../../src/services/auth.service.js';
 
 describe('GET /api/tickets/:id', () => {
-  let requesterId: number;
-  let otherRequesterId: number;
+  let requesterId: number; let sessionCookie: string;
+  let otherRequesterId: number; let otherSessionCookie: string;
   let categoryId: number;
   let systemId: number;
   let myTicketId: number;
@@ -18,11 +19,15 @@ describe('GET /api/tickets/:id', () => {
     const sys = await getPrisma().relatedSystem.create({ data: { name: 'Detail Sys ' + Date.now() } });
     systemId = sys.id;
 
-    const reqUser = await getPrisma().requesterUser.create({ data: { name: 'Detail Tester', email: 'detail1' + Date.now() + '@test.com' } });
+    const reqUser = await getPrisma().user.create({ data: { name: 'Detail Tester', email: 't_' + Date.now() + 'detail1' + Date.now() + '@test.com', requiresPasswordChange: false } });
+    
     requesterId = reqUser.id;
+    sessionCookie = await authService.createSession(requesterId);
 
-    const reqUser2 = await getPrisma().requesterUser.create({ data: { name: 'Detail Tester 2', email: 'detail2' + Date.now() + '@test.com' } });
+    const reqUser2 = await getPrisma().user.create({ data: { name: 'Detail Tester 2', email: 't2_' + Date.now() + 'detail2' + Date.now() + '@test.com', requiresPasswordChange: false } });
+    
     otherRequesterId = reqUser2.id;
+    otherSessionCookie = await authService.createSession(otherRequesterId);
 
     const t1 = await getPrisma().ticket.create({
       data: { categoryId, relatedSystemId: systemId, requesterId, summary: 'My ticket', priority: 'High', description: 'My desc', status: 'New' }
@@ -36,10 +41,10 @@ describe('GET /api/tickets/:id', () => {
   });
 
   afterAll(async () => {
-    await getPrisma().ticket.deleteMany({ where: { id: { in: [myTicketId, otherTicketId] } } });
-    await getPrisma().requesterUser.deleteMany({ where: { id: { in: [requesterId, otherRequesterId] } } });
-    await getPrisma().category.delete({ where: { id: categoryId } });
-    await getPrisma().relatedSystem.delete({ where: { id: systemId } });
+    //{ where: { id: { in: [myTicketId, otherTicketId] } } });
+    //{ where: { id: { in: [requesterId, otherRequesterId] } } });
+    //{ where: { id: categoryId } });
+    //{ where: { id: systemId } });
   });
 
   it('requires X-Requester-Id header', async () => {
@@ -58,7 +63,7 @@ describe('GET /api/tickets/:id', () => {
   });
 
   it('returns ticket if owner matches', async () => {
-    const res = await request(app).get('/api/tickets/' + myTicketId).set('X-Requester-Id', String(requesterId));
+    const res = await request(app).get('/api/tickets/' + myTicketId).set("Cookie", `sessionId=${sessionCookie}`);
     expect(res.status).toBe(200);
     expect(res.body.summary).toBe('My ticket');
     expect(res.body).toHaveProperty('ticketNumber');
@@ -68,7 +73,7 @@ describe('GET /api/tickets/:id', () => {
   it('returns 403 Forbidden if accessing someone elses ticket', async () => {
     // Requester A (otherRequesterId) owns Ticket A (otherTicketId)
     // Requester B (requesterId) requests Ticket A
-    const res = await request(app).get('/api/tickets/' + otherTicketId).set('X-Requester-Id', String(requesterId));
+    const res = await request(app).get('/api/tickets/' + otherTicketId).set("Cookie", `sessionId=${sessionCookie}`);
     
     // Assert response is 403 Forbidden
     expect(res.status).toBe(403);
@@ -81,7 +86,7 @@ describe('GET /api/tickets/:id', () => {
   });
 
   it('returns 404 if ticket does not exist', async () => {
-    const res = await request(app).get('/api/tickets/999999').set('X-Requester-Id', String(requesterId));
+    const res = await request(app).get('/api/tickets/999999').set("Cookie", `sessionId=${sessionCookie}`);
     expect(res.status).toBe(404);
   });
 });

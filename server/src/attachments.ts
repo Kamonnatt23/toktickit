@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { getPrisma } from './prisma.js';
+import { requireAuth, AuthenticatedRequest } from './middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -38,22 +39,9 @@ const upload = multer({
 });
 
 // Helper to authenticate
-const authRequester = async (req: Request, res: Response) => {
-  const requesterIdStr = req.header("X-Requester-Id");
-  if (!requesterIdStr) return { error: 401, message: "Missing X-Requester-Id header" };
-  const requesterId = parseInt(requesterIdStr, 10);
-  if (isNaN(requesterId)) return { error: 401, message: "Invalid X-Requester-Id header" };
-  const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
-  if (!requester || !requester.isActive) return { error: 401, message: "Unauthorized" };
-  return { requesterId };
-};
-
-router.post('/', async (req: Request, res: Response): Promise<any> => {
+router.post("/", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const auth = await authRequester(req, res);
-    if ('error' in auth) {
-      return res.status(auth.error).json({ error: auth.message });
-    }
+    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     await new Promise<void>((resolve, reject) => {
       upload.single('file')(req, res, (err: any) => {
@@ -87,7 +75,7 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(404).json({ error: "Ticket not found" });
     }
 
-    if (ticket.requesterId !== auth.requesterId) {
+    if (ticket.requesterId !== requesterId) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.status(403).json({ error: "Forbidden: Not your ticket" });
     }
@@ -113,7 +101,7 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
     if (err.message === 'Invalid file type' || err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ error: "Invalid file type or size exceeded" });
     }
-    return res.status(500).json({ error: "Server error" });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
   }
 });
 
@@ -131,7 +119,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<any> => {
     });
 
     if (!attachment) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== auth.requesterId) {
+    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -144,14 +132,13 @@ router.get('/:id', async (req: Request, res: Response): Promise<any> => {
       isDeleted: attachment.isDeleted
     });
   } catch (err) {
-    return res.status(500).json({ error: "Server error" });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
   }
 });
 
-router.get('/:id/download', async (req: Request, res: Response): Promise<any> => {
+router.get("/:id/download", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const auth = await authRequester(req, res);
-    if ('error' in auth) return res.status(auth.error).json({ error: auth.message });
+    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     const id = parseInt(req.params.id, 10);
     const attachment = await getPrisma().attachment.findUnique({
@@ -160,7 +147,7 @@ router.get('/:id/download', async (req: Request, res: Response): Promise<any> =>
     });
 
     if (!attachment || attachment.isDeleted) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== auth.requesterId) {
+    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -171,14 +158,13 @@ router.get('/:id/download', async (req: Request, res: Response): Promise<any> =>
     res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
-    return res.status(500).json({ error: "Server error" });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
   }
 });
 
-router.delete('/:id', async (req: Request, res: Response): Promise<any> => {
+router.delete('/:id', requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const auth = await authRequester(req, res);
-    if ('error' in auth) return res.status(auth.error).json({ error: auth.message });
+    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     const id = parseInt(req.params.id, 10);
     const attachment = await getPrisma().attachment.findUnique({
@@ -187,7 +173,7 @@ router.delete('/:id', async (req: Request, res: Response): Promise<any> => {
     });
 
     if (!attachment || attachment.isDeleted) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== auth.requesterId) {
+    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
       return res.status(403).json({ error: "Forbidden" });
     }
     
@@ -208,7 +194,7 @@ router.delete('/:id', async (req: Request, res: Response): Promise<any> => {
 
     return res.status(204).send();
   } catch (err) {
-    return res.status(500).json({ error: "Server error" });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
   }
 });
 

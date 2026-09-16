@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useDevContext } from '../contexts/DevContext.js';
+import { useAuth } from '../contexts/AuthContext.js';
 
 interface Ticket {
   id: number;
@@ -13,11 +13,11 @@ interface Ticket {
 }
 
 interface MyTicketsProps {
-  onTicketClick: (id: number) => void;
+  onTicketClick?: (id: number) => void;
 }
 
 export function MyTickets({ onTicketClick }: MyTicketsProps) {
-  const { activeUser } = useDevContext();
+  const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -31,7 +31,7 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
   const [total, setTotal] = useState(0);
 
   const fetchTickets = async () => {
-    if (!activeUser) return;
+    if (!user) return;
     setLoading(true);
     setError('');
     
@@ -47,7 +47,8 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
       if (status && status !== 'All') params.append('status', status);
 
       const res = await fetch(`${API_URL}/api/tickets?${params.toString()}`, {
-        headers: { 'X-Requester-Id': String(activeUser.id) }
+        headers: {  },
+        credentials: 'include'
       });
       
       if (!res.ok) throw new Error('Failed to fetch tickets');
@@ -66,7 +67,7 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
 
   useEffect(() => {
     fetchTickets();
-  }, [activeUser, page, sortBy, sortOrder, status]);
+  }, [user, page, sortBy, sortOrder, status]);
 
   // Debounced search
   useEffect(() => {
@@ -77,7 +78,7 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
     return () => clearTimeout(timer);
   }, [search]);
 
-  if (!activeUser) return null;
+  if (!user) return null;
 
   return (
     <div className="card shadow-sm border-0 mt-4" style={{ backgroundColor: '#fdfaf6', borderRadius: '20px', overflow: 'hidden' }}>

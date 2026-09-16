@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MyTickets } from '../../src/components/MyTickets.js';
-import { DevProvider } from '../../src/contexts/DevContext.js';
+import { AuthProvider } from '../../src/contexts/AuthContext.js';
 
 const mockUser = { id: 1, name: 'John Doe', email: 'john@example.com', role: 'Requester' };
 const mockTickets = [
@@ -17,7 +17,7 @@ describe('MyTickets', () => {
       if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
       }
-      if (url.includes('/api/tickets')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/tickets')) {
         if (url.includes('search=Lost')) {
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: [mockTickets[1]], pagination: { total: 1, totalPages: 1 } }) });
         }
@@ -31,7 +31,7 @@ describe('MyTickets', () => {
   });
 
   it('renders tickets list', async () => {
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('TKT-001')).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('MyTickets', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: [], pagination: { total: 0, totalPages: 1 } }) });
     }) as any;
     
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('No tickets found!')).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe('MyTickets', () => {
   });
 
   it('searches for tickets', async () => {
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('Broken Mouse')).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('MyTickets', () => {
   });
   
   it('filters by status and sorts', async () => {
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('Broken Mouse')).toBeInTheDocument();
@@ -100,13 +100,13 @@ describe('MyTickets', () => {
       if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
       }
-      if (url.includes('/api/tickets')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/tickets')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: mockTickets, pagination: { total: 10, totalPages: 2 } }) });
       }
       return Promise.reject(new Error('Not Found'));
     }) as any;
 
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
@@ -132,13 +132,13 @@ describe('MyTickets', () => {
       if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
       }
-      if (url.includes('/api/tickets')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/tickets')) {
         return Promise.reject(new Error('Failed to fetch tickets'));
       }
       return Promise.reject(new Error('Not Found'));
     }) as any;
     
-    render(<DevProvider><MyTickets /></DevProvider>);
+    render(<AuthProvider><MyTickets /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('Failed to fetch tickets')).toBeInTheDocument();
