@@ -43,11 +43,12 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
       try {
         const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
         const catRes = await fetch(`${API_URL}/api/categories`, { credentials: 'include' });
+        
         if (catRes.ok) {
           setCategories(await catRes.json());
         }
       } catch (err) {
-        console.error("Failed to load categories for filters", err);
+        console.error("Failed to load filters", err);
       }
     };
     loadFilters();
@@ -155,6 +156,37 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
     return <div className="alert alert-danger">Access Denied</div>;
   }
 
+  const renderPageNumbers = () => {
+    let pages: (number | string)[] = [];
+    const maxVisible = 5;
+    
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (page <= 3) {
+        pages = [1, 2, 3, 4, '...', totalPages];
+      } else if (page >= totalPages - 2) {
+        pages = [1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      } else {
+        pages = [1, '...', page - 1, page, page + 1, '...', totalPages];
+      }
+    }
+    
+    return pages.map((p, idx) => (
+      p === '...' ? (
+        <span key={`ellipsis-${idx}`} className="btn btn-sm btn-outline-secondary disabled border-0 d-none d-sm-inline-block">...</span>
+      ) : (
+        <button 
+          key={p} 
+          className={`btn btn-sm ${page === p ? 'btn-secondary' : 'btn-outline-secondary'} d-none d-sm-inline-block`}
+          onClick={() => setPage(p as number)}
+        >
+          {p}
+        </button>
+      )
+    ));
+  };
+
   return (
     <div className="card shadow-sm border-0">
       <div className="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
@@ -200,7 +232,7 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
             <select className="form-select bg-light" value={ownerId} onChange={e => { setOwnerId(e.target.value); setPage(1); }}>
               <option value="All">All Assignees</option>
               <option value="Unassigned">Unassigned</option>
-              {user.role === 'IT Staff' && <option value={user.id}>Assigned to Me</option>}
+              {user && <option value={String(user.id)}>Assigned to Me</option>}
             </select>
           </div>
           <div className="col-6 col-md-2">
@@ -293,21 +325,22 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
             <div className="d-flex justify-content-between align-items-center mt-4">
               <span className="text-muted small">Page {page} of {totalPages || 1}</span>
               <div className="btn-group">
-                <button 
-                  className="btn btn-sm btn-outline-secondary" 
-                  disabled={page === 1}
-                  onClick={() => setPage(p => p - 1)}
-                >
-                  Previous
-                </button>
-                <button 
-                  className="btn btn-sm btn-outline-secondary" 
-                  disabled={page >= totalPages}
-                  onClick={() => setPage(p => p + 1)}
-                >
-                  Next
-                </button>
-              </div>
+              <button 
+                className="btn btn-sm btn-outline-secondary" 
+                disabled={page <= 1} 
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+              >
+                Previous
+              </button>
+              {renderPageNumbers()}
+              <button 
+                className="btn btn-sm btn-outline-secondary" 
+                disabled={page >= totalPages} 
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </button>
+            </div>
             </div>
           </>
         )}

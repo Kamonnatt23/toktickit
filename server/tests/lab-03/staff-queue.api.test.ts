@@ -12,6 +12,9 @@ describe('GET /api/staff/tickets', () => {
   let systemId: number;
   let staffUserId: number;
 
+  let createdTicketIds: number[] = [];
+  let createdUserIds: number[] = [];
+
   beforeAll(async () => {
     const cat = await getPrisma().category.create({ data: { name: 'Staff Cat ' + Date.now() } });
     categoryId = cat.id;
@@ -21,13 +24,16 @@ describe('GET /api/staff/tickets', () => {
 
     const reqUser = await getPrisma().user.create({ data: { name: 'Req User', email: 'req' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
     requesterCookie = await authService.createSession(reqUser.id);
+    createdUserIds.push(reqUser.id);
 
     const staffUser = await getPrisma().user.create({ data: { name: 'Staff User', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
     staffUserId = staffUser.id;
     staffCookie = await authService.createSession(staffUser.id);
+    createdUserIds.push(staffUser.id);
 
     const adminUser = await getPrisma().user.create({ data: { name: 'Admin User', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
     adminCookie = await authService.createSession(adminUser.id);
+    createdUserIds.push(adminUser.id);
 
     await getPrisma().ticket.createMany({
       data: [
@@ -35,6 +41,33 @@ describe('GET /api/staff/tickets', () => {
         { categoryId, relatedSystemId: systemId, requesterId: reqUser.id, summary: 'Update OS', priority: 'Medium', itPriority: 'Medium', description: 'Desc', status: 'In Progress' }
       ]
     });
+    
+    const tickets = await getPrisma().ticket.findMany({
+      where: { requesterId: reqUser.id, categoryId, relatedSystemId: systemId }
+    });
+    createdTicketIds = tickets.map((t: any) => t.id);
+  });
+
+  afterAll(async () => {
+    try {
+      if (createdUserIds.length > 0) {
+        await getPrisma().session.deleteMany({ where: { userId: { in: createdUserIds } } });
+      }
+      if (createdTicketIds.length > 0) {
+        await getPrisma().ticket.deleteMany({ where: { id: { in: createdTicketIds } } });
+      }
+      if (categoryId) {
+        await getPrisma().category.deleteMany({ where: { id: categoryId } });
+      }
+      if (systemId) {
+        await getPrisma().relatedSystem.deleteMany({ where: { id: systemId } });
+      }
+      if (createdUserIds.length > 0) {
+        await getPrisma().user.deleteMany({ where: { id: { in: createdUserIds } } });
+      }
+    } catch (err) {
+      console.error('Cleanup failed:', err);
+    }
   });
 
   it('denies unauthenticated access with 401', async () => {
@@ -105,9 +138,22 @@ describe('GET /api/staff/tickets', () => {
   });
 
   it('handles sorting (sortBy and sortOrder)', async () => {
-    const res = await request(app).get('/api/staff/tickets?sortBy=status&sortOrder=asc').set('Cookie', `sessionId=${staffCookie}`);
+    // Test sortBy=createdAt desc (default)
+    let res = await request(app).get('/api/staff/tickets?categoryId=' + categoryId + '&sortBy=createdAt&sortOrder=desc').set('Cookie', `sessionId=${staffCookie}`);
     expect(res.status).toBe(200);
-    expect(res.body.data).toBeDefined();
+    expect(res.body.data.length).toBeGreaterThanOrEqual(2);
+    expect(new Date(res.body.data[0].createdAt).getTime()).toBeGreaterThanOrEqual(new Date(res.body.data[1].createdAt).getTime());
+
+    // Test sortBy=createdAt asc
+    res = await request(app).get('/api/staff/tickets?categoryId=' + categoryId + '&sortBy=createdAt&sortOrder=asc').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+    expect(new Date(res.body.data[0].createdAt).getTime()).toBeLessThanOrEqual(new Date(res.body.data[1].createdAt).getTime());
+
+    // Test sortBy=status asc ('In Progress' comes before 'New')
+    res = await request(app).get('/api/staff/tickets?categoryId=' + categoryId + '&sortBy=status&sortOrder=asc').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].status).toBe('In Progress');
+    expect(res.body.data[1].status).toBe('New');
   });
 
   it('safely ignores invalid query parameters without 400 or 500', async () => {

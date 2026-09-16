@@ -145,4 +145,69 @@ describe('StaffQueue Component', () => {
       expect(call).toBeTruthy();
     });
   });
+
+  it('handles assigned to filter interaction', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => defaultData };
+    });
+
+    renderWithContext({ id: 2, role: 'IT Staff', name: 'Staff' });
+    
+    // We should see 'All Assignees'
+    const assigneeSelect = (await screen.findAllByRole('combobox')).find((el: any) => el.innerHTML.includes('All Assignees'));
+    expect(assigneeSelect).toBeInTheDocument();
+    
+    mockFetch.mockClear();
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => defaultData };
+    });
+
+    // Select 'Unassigned'
+    fireEvent.change(assigneeSelect!, { target: { value: 'Unassigned' } });
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find((c: any) => c[0].includes('ownerId=Unassigned'));
+      expect(call).toBeTruthy();
+    });
+
+    // Select 'Assigned to Me' (id 2)
+    fireEvent.change(assigneeSelect!, { target: { value: '2' } });
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find((c: any) => c[0].includes('ownerId=2'));
+      expect(call).toBeTruthy();
+    });
+  });
+
+  it('handles page number interaction', async () => {
+    // Modify defaultData temporarily to have 5 pages
+    const multiPageData = {
+      ...defaultData,
+      pagination: { total: 50, page: 1, limit: 10, totalPages: 5 }
+    };
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => multiPageData };
+    });
+
+    renderWithContext({ id: 2, role: 'IT Staff', name: 'Staff' });
+    
+    // Wait for page numbers to render
+    const page3Btn = await screen.findByText('3');
+    expect(page3Btn).toBeInTheDocument();
+    
+    mockFetch.mockClear();
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => multiPageData };
+    });
+
+    fireEvent.click(page3Btn);
+
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find((c: any) => c[0].includes('page=3'));
+      expect(call).toBeTruthy();
+    });
+  });
 });
