@@ -203,10 +203,13 @@ describe('Attachments API', () => {
     expect(res6.body.error).toMatch(/5 attachments/);
   });
 
-  describe('Authorization Rules', () => {
+    describe('Authorization Rules', () => {
     let staffId, staffSessionCookie;
     let adminId, adminSessionCookie;
     let authTicketId;
+    let reqSessionCookie;
+    let reqSessionCookie2;
+    let otherStaffSessionCookie;
     
     beforeAll(async () => {
       const { getPrisma } = await import('../../src/prisma.js');
@@ -224,14 +227,13 @@ describe('Attachments API', () => {
       const sys = await getPrisma().relatedSystem.findFirst();
       
       const reqUser = await getPrisma().user.create({ data: { name: 'Req Auth', email: 'reqauth_' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
-      const reqSessionCookie = await authService.createSession(reqUser.id);
+      reqSessionCookie = await authService.createSession(reqUser.id);
       
       const reqUser2 = await getPrisma().user.create({ data: { name: 'Req Auth 2', email: 'reqauth2_' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
-      const reqSessionCookie2 = await authService.createSession(reqUser2.id);
+      reqSessionCookie2 = await authService.createSession(reqUser2.id);
 
-      // Add to describe context to be used in tests
-      this.reqSessionCookie = reqSessionCookie;
-      this.reqSessionCookie2 = reqSessionCookie2;
+      const otherStaffUser = await getPrisma().user.create({ data: { name: 'Other Staff', email: 'otherstaff_' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+      otherStaffSessionCookie = await authService.createSession(otherStaffUser.id);
 
       const t = await getPrisma().ticket.create({
         data: { categoryId: cat.id, relatedSystemId: sys.id, requesterId: reqUser.id, ownerId: staffId, summary: 'AuthT', priority: 'High', description: 'AuthD' }
@@ -242,7 +244,7 @@ describe('Attachments API', () => {
     it('requester owner can access their attachment', async () => {
       const uploadRes = await request(app)
         .post('/api/attachments')
-        .set('Cookie', `sessionId=${this.reqSessionCookie}`)
+        .set('Cookie', `sessionId=${reqSessionCookie}`)
         .field('ticketId', authTicketId)
         .attach('file', Buffer.from('test'), 'test.png');
       expect(uploadRes.status).toBe(201);
@@ -250,14 +252,14 @@ describe('Attachments API', () => {
 
       const getRes = await request(app)
         .get(`/api/attachments/${attId}`)
-        .set('Cookie', `sessionId=${this.reqSessionCookie}`);
+        .set('Cookie', `sessionId=${reqSessionCookie}`);
       expect(getRes.status).toBe(200);
     });
 
     it('requester cannot access another requesters attachment', async () => {
       const uploadRes = await request(app)
         .post('/api/attachments')
-        .set('Cookie', `sessionId=${this.reqSessionCookie}`)
+        .set('Cookie', `sessionId=${reqSessionCookie}`)
         .field('ticketId', authTicketId)
         .attach('file', Buffer.from('test'), 'test2.png');
       expect(uploadRes.status).toBe(201);
@@ -265,7 +267,7 @@ describe('Attachments API', () => {
 
       const getRes = await request(app)
         .get(`/api/attachments/${attId}`)
-        .set('Cookie', `sessionId=${this.reqSessionCookie2}`);
+        .set('Cookie', `sessionId=${reqSessionCookie2}`);
       expect(getRes.status).toBe(404); // Non-enumeration
     });
 
@@ -299,12 +301,56 @@ describe('Attachments API', () => {
       expect(uploadRes.status).toBe(403);
     });
 
+    it('Administrator can view and download attachments (read-only)', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('admin-read-test'), 'admin.png');
+      const attId = uploadRes.body.id;
+
+      const getRes = await request(app)
+        .get(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${adminSessionCookie}`);
+      expect(getRes.status).toBe(200);
+
+      const dlRes = await request(app)
+        .get(`/api/attachments/${attId}/download`)
+        .set('Cookie', `sessionId=${adminSessionCookie}`);
+      expect(dlRes.status).toBe(200);
+    });
+
+    it('IT Staff cannot manage attachments on a ticket owned by another staff', async () => {
+      // POST upload attempt
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test-other-staff'), 'other-staff.png');
+      expect(uploadRes.status).toBe(403);
+
+      // Need an existing attachment to test DELETE
+      const setupUploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test'), 'test.png');
+      const attId = setupUploadRes.body.id;
+
+      // DELETE attempt
+      const delRes = await request(app)
+        .delete(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
+        .send({ removalReason: 'Unauthorized remove' });
+      expect(delRes.status).toBe(403);
+    });
+
     it('unexpected server error returns 500 with a generic error and does not expose internal error details', async () => {
       // Instead of mocking which crashes Vitest workers across files,
       // we'll trigger an overflow error in Prisma by passing a huge integer.
       const getRes = await request(app)
         .get(`/api/attachments/99999999999999999999/download`)
-        .set('Cookie', `sessionId=${this.reqSessionCookie}`);
+        .set('Cookie', `sessionId=${reqSessionCookie}`);
       
       expect(getRes.status).toBe(500);
       expect(getRes.body).toEqual({ error: 'Internal server error' });
