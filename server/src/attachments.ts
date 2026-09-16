@@ -41,7 +41,6 @@ const upload = multer({
 // Helper to authenticate
 router.post("/", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     await new Promise<void>((resolve, reject) => {
       upload.single('file')(req, res, (err: any) => {

@@ -70,13 +70,15 @@ describe('GET /api/tickets/:id', () => {
     expect(res.body.category.name).toMatch(/Detail Cat/);
   });
 
-  it('returns 403 Forbidden if accessing someone elses ticket', async () => {
+  it('returns 404 Not Found if accessing someone elses ticket', async () => {
     // Requester A (otherRequesterId) owns Ticket A (otherTicketId)
     // Requester B (requesterId) requests Ticket A
-    const res = await request(app).get('/api/tickets/' + otherTicketId).set("Cookie", `sessionId=${sessionCookie}`);
+    const res = await request(app).get('/api/tickets/' + otherTicketId)
+      .set("Cookie", `sessionId=${sessionCookie}`)
+      .set("X-Requester-Id", String(otherRequesterId)); // Try to spoof identity
     
-    // Assert response is 403 Forbidden
-    expect(res.status).toBe(403);
+    // Assert response is 404 Not Found
+    expect(res.status).toBe(404);
     
     // Assert Ticket A's data is not exposed
     expect(res.body).not.toHaveProperty('summary');
@@ -84,6 +86,22 @@ describe('GET /api/tickets/:id', () => {
     expect(res.body).not.toHaveProperty('ticketNumber');
     expect(res.body).toHaveProperty('error');
   });
+
+  
+  it('allows IT Staff to view any ticket', async () => {
+    const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+    const staffCookie = await authService.createSession(staffUser.id);
+    const res = await request(app).get('/api/tickets/' + myTicketId).set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+  });
+
+  it('allows Administrator to view any ticket', async () => {
+    const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+    const adminCookie = await authService.createSession(adminUser.id);
+    const res = await request(app).get('/api/tickets/' + myTicketId).set('Cookie', `sessionId=${adminCookie}`);
+    expect(res.status).toBe(200);
+  });
+
 
   it('returns 404 if ticket does not exist', async () => {
     const res = await request(app).get('/api/tickets/999999').set("Cookie", `sessionId=${sessionCookie}`);
