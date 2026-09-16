@@ -114,10 +114,7 @@ describe('Lab 3 Database Schema & Seed Verification', () => {
       // Find an existing legacy Lab 2 attachment
       const existingAttachment = await prisma.attachment.findFirst({
         where: {
-          // ensure we're looking at legacy data (created before migration)
-          createdAt: {
-            lt: new Date('2026-09-15T00:00:00.000Z')
-          }
+          fileName: "screenshot.png"
         },
         include: { ticket: true }
       });

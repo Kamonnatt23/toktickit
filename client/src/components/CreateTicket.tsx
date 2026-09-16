@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { useDevContext } from '../contexts/DevContext.js';
+import { useAuth } from '../contexts/AuthContext.js';
 
 interface Category {
   id: number;
@@ -12,7 +12,7 @@ interface RelatedSystem {
 }
 
 export function CreateTicket() {
-  const { activeUser } = useDevContext();
+  const { user } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [systems, setSystems] = useState<RelatedSystem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -95,23 +95,32 @@ export function CreateTicket() {
       return;
     }
 
-    if (!activeUser) {
-      setErrors({ form: "You must be logged in to create a ticket." });
+    if (!user) {
+      setErrors({ submit: 'Must be logged in to create a ticket' });
       return;
     }
 
     setSubmitting(true);
-    setErrors({});
-    
     try {
       const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+      const attachmentIds: number[] = [];
+      const payload = {
+        categoryId: parseInt(form.categoryId, 10),
+        relatedSystemId: parseInt(form.relatedSystemId, 10),
+        summary: form.summary,
+        priority: form.priority,
+        description: form.description,
+        attachmentIds
+      };
+
       const res = await fetch(`${API_URL}/api/tickets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Requester-Id': String(activeUser.id)
+          
         },
-        body: JSON.stringify(form)
+        credentials: 'include',
+        body: JSON.stringify(payload)
       });
       
       if (!res.ok) {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { TicketDetail } from '../../src/components/TicketDetail.js';
-import { DevProvider } from '../../src/contexts/DevContext.js';
+import { AuthProvider } from '../../src/contexts/AuthContext.js';
 
 const mockUser = { id: 1, name: 'John Doe', email: 'john@example.com', role: 'Requester' };
 const mockTicket = { 
@@ -30,7 +30,7 @@ describe('TicketDetail', () => {
     localStorage.setItem('dev_requester_user', JSON.stringify(mockUser));
     
     global.fetch = vi.fn((url: string, options: any) => {
-      if (url.includes('/api/dev/users')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
       }
       if (url.includes('/api/tickets/1')) {
@@ -68,7 +68,7 @@ describe('TicketDetail', () => {
 
   it('renders ticket details successfully', async () => {
     const onBack = vi.fn();
-    render(<DevProvider><TicketDetail ticketId={1} onBack={onBack} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={1} onBack={onBack} /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('My Issue')).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe('TicketDetail', () => {
   });
 
   it('renders attachments list including soft-deleted ones', async () => {
-    render(<DevProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText('screenshot.png')).toBeInTheDocument();
       expect(screen.getByText('old-screenshot.png')).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe('TicketDetail', () => {
   });
 
   it('handles attachment upload', async () => {
-    render(<DevProvider><TicketDetail ticketId={1} onBack={vi.fn()} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={1} onBack={vi.fn()} /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText('My Issue')).toBeInTheDocument();
     });
@@ -111,7 +111,7 @@ describe('TicketDetail', () => {
   });
 
   it('handles attachment download', async () => {
-    render(<DevProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText('screenshot.png')).toBeInTheDocument();
     });
@@ -125,7 +125,7 @@ describe('TicketDetail', () => {
   });
 
   it('handles attachment removal', async () => {
-    render(<DevProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={2} onBack={vi.fn()} /></AuthProvider>);
     await waitFor(() => {
       expect(screen.getByText('screenshot.png')).toBeInTheDocument();
     });
@@ -141,7 +141,7 @@ describe('TicketDetail', () => {
 
   it('calls onBack when back button is clicked', async () => {
     const onBack = vi.fn();
-    render(<DevProvider><TicketDetail ticketId={1} onBack={onBack} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={1} onBack={onBack} /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('My Issue')).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe('TicketDetail', () => {
 
   it('shows error state when ticket is not found', async () => {
     const onBack = vi.fn();
-    render(<DevProvider><TicketDetail ticketId={99} onBack={onBack} /></DevProvider>);
+    render(<AuthProvider><TicketDetail ticketId={99} onBack={onBack} /></AuthProvider>);
     
     await waitFor(() => {
       expect(screen.getByText('Ticket not found')).toBeInTheDocument();

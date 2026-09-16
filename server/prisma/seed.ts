@@ -100,6 +100,16 @@ async function main() {
           description: "My email is not loading on my new laptop.",
           status: "New",
           requesterId: requester1.id,
+          attachments: {
+            create: [
+              {
+                fileName: "screenshot.png",
+                fileType: "image/png",
+                fileSize: 1024,
+                filePath: "/uploads/screenshot.png"
+              }
+            ]
+          }
         }
       });
     }

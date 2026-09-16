@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes.js";
 import attachmentsRouter from "./attachments.js";
+import { requireAuth, AuthenticatedRequest } from "./middleware/auth.middleware.js";
 
 let prisma: PrismaClient;
 
@@ -55,7 +56,7 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
 
 app.get("/api/dev/users", async (_req: Request, res: Response) => {
   try {
-    const users = await getPrisma().requesterUser.findMany({
+    const users = await getPrisma().user.findMany({
       where: { isActive: true },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
@@ -81,22 +82,9 @@ app.get("/api/related-systems", async (_req: Request, res: Response) => {
   }
 });
 
-app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
+app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterIdStr = req.header("X-Requester-Id");
-    if (!requesterIdStr) {
-      return res.status(401).json({ error: "Unauthorized: Missing X-Requester-Id header" });
-    }
-    
-    const requesterId = parseInt(requesterIdStr, 10);
-    if (isNaN(requesterId)) {
-      return res.status(401).json({ error: "Unauthorized: Invalid X-Requester-Id header" });
-    }
-
-    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
-    if (!requester || !requester.isActive) {
-      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
-    }
+    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     const { categoryId, relatedSystemId, summary, priority, description, attachmentIds } = req.body;
     
@@ -180,17 +168,9 @@ app.post("/api/tickets", async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-app.get("/api/tickets", async (req: Request, res: Response): Promise<any> => {
+app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterIdStr = req.header("X-Requester-Id");
-    if (!requesterIdStr) return res.status(401).json({ error: "Missing X-Requester-Id header" });
-    const requesterId = parseInt(requesterIdStr, 10);
-    if (isNaN(requesterId)) return res.status(401).json({ error: "Invalid X-Requester-Id header" });
-
-    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
-    if (!requester || !requester.isActive) {
-      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
-    }
+    const requesterId = (req as AuthenticatedRequest).user!.id;
 
     const { search, status, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
@@ -251,18 +231,9 @@ app.get("/api/tickets", async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-app.get("/api/tickets/:id", async (req: Request, res: Response): Promise<any> => {
+app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterIdStr = req.header("X-Requester-Id");
-    if (!requesterIdStr) return res.status(401).json({ error: "Missing X-Requester-Id header" });
-    
-    const requesterId = parseInt(requesterIdStr, 10);
-    if (isNaN(requesterId)) return res.status(401).json({ error: "Invalid X-Requester-Id header" });
-
-    const requester = await getPrisma().requesterUser.findUnique({ where: { id: requesterId } });
-    if (!requester || !requester.isActive) {
-      return res.status(401).json({ error: "Unauthorized: Requester not found or inactive" });
-    }
+    const requesterId = (req as AuthenticatedRequest).user!.id;
     
     const ticketId = parseInt(req.params.id, 10);
     if (isNaN(ticketId)) {
