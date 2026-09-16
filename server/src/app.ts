@@ -172,6 +172,98 @@ app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promi
   }
 });
 
+
+app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Requesters cannot access the Staff Queue" });
+    }
+
+    const { search, status, categoryId, ownerId, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+
+    let pageNum = parseInt(page as string, 10);
+    if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
+    
+    let limitNum = parseInt(limit as string, 10);
+    if (isNaN(limitNum) || limitNum < 1) limitNum = 10;
+    if (limitNum > 50) limitNum = 50;
+    
+    const skip = (pageNum - 1) * limitNum;
+
+    const whereClause: any = {};
+
+    if (status && typeof status === 'string' && status !== 'All') {
+      whereClause.status = status;
+    }
+
+    if (categoryId && typeof categoryId === 'string' && categoryId !== 'All') {
+      const catId = parseInt(categoryId, 10);
+      if (!isNaN(catId)) whereClause.categoryId = catId;
+    }
+
+    if (ownerId && typeof ownerId === 'string' && ownerId !== 'All') {
+      if (ownerId === 'Unassigned') {
+        whereClause.ownerId = null;
+      } else {
+        const oId = parseInt(ownerId, 10);
+        if (!isNaN(oId)) whereClause.ownerId = oId;
+      }
+    }
+
+    if (search && typeof search === 'string') {
+      const searchStr = search.trim();
+      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
+      
+      if (searchIdMatch) {
+         whereClause.id = parseInt(searchIdMatch[1], 10);
+      } else {
+         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+      }
+    }
+
+    const validSortFields = ['createdAt', 'priority', 'itPriority', 'status'];
+    const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';
+    const order = sortOrder === 'asc' ? 'asc' : 'desc';
+
+    const [tickets, total] = await Promise.all([
+      getPrisma().ticket.findMany({
+        where: whereClause,
+        include: { 
+          category: true, 
+          relatedSystem: true,
+          requester: { select: { id: true, name: true, email: true } },
+          owner: { select: { id: true, name: true, email: true } }
+        },
+        orderBy: { [sortField]: order },
+        skip,
+        take: limitNum,
+      }),
+      getPrisma().ticket.count({ where: whereClause })
+    ]);
+
+    const data = tickets.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    return res.status(200).json({
+      data,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching staff tickets:", err);
+    return res.status(500).json({ error: "Failed to fetch staff queue" });
+  }
+});
+
+
 app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
