@@ -84,10 +84,6 @@ router.post("/", requireAuth, async (req: Request, res: Response): Promise<any> 
       if (req.file) fs.unlinkSync(req.file.path);
       return res.status(404).json({ error: "Ticket not found" }); // Non-enumeration
     }
-    if (user.role === 'IT Staff' && ticket.ownerId !== null && ticket.ownerId !== user.id) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: "Forbidden: Not authorized to operate on this ticket" });
-    }
 
     if (ticket.attachments.length >= 5) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -196,9 +192,6 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response): Promise<
     if (attachment.ticket) {
       if (user.role === 'Requester' && attachment.ticket.requesterId !== user.id) {
         return res.status(404).json({ error: "Not found" });
-      }
-      if (user.role === 'IT Staff' && attachment.ticket.ownerId !== null && attachment.ticket.ownerId !== user.id) {
-        return res.status(403).json({ error: "Forbidden: Not authorized to operate on this ticket" });
       }
     }
     

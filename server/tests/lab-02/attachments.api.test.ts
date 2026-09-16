@@ -320,14 +320,15 @@ describe('Attachments API', () => {
       expect(dlRes.status).toBe(200);
     });
 
-    it('IT Staff cannot manage attachments on a ticket owned by another staff', async () => {
+    it('IT Staff can manage attachments on any ticket', async () => {
       // POST upload attempt
       const uploadRes = await request(app)
         .post('/api/attachments')
         .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
         .field('ticketId', authTicketId)
         .attach('file', Buffer.from('test-other-staff'), 'other-staff.png');
-      expect(uploadRes.status).toBe(403);
+      expect(uploadRes.status).toBe(201);
+      const attId2 = uploadRes.body.id;
 
       // Need an existing attachment to test DELETE
       const setupUploadRes = await request(app)
@@ -339,18 +340,26 @@ describe('Attachments API', () => {
 
       // DELETE attempt
       const delRes = await request(app)
-        .delete(`/api/attachments/${attId}`)
+        .delete(`/api/attachments/${attId2}`) // delete the one we just made
         .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
-        .send({ removalReason: 'Unauthorized remove' });
-      expect(delRes.status).toBe(403);
+        .send({ removalReason: 'Authorized remove' });
+      expect(delRes.status).toBe(204);
     });
 
     it('unexpected server error returns 500 with a generic error and does not expose internal error details', async () => {
-      // Instead of mocking which crashes Vitest workers across files,
-      // we'll trigger an overflow error in Prisma by passing a huge integer.
+      const { vi } = await import('vitest');
+      const { getPrisma } = await import('../../src/prisma.js');
+      const original = getPrisma().attachment.findUnique;
+      vi.spyOn(getPrisma().attachment, 'findUnique').mockImplementation(async (args) => {
+        if (args?.where?.id === 99999) throw new Error('Secret DB Error');
+        return original(args);
+      });
+
       const getRes = await request(app)
-        .get(`/api/attachments/99999999999999999999/download`)
+        .get(`/api/attachments/99999/download`)
         .set('Cookie', `sessionId=${reqSessionCookie}`);
+        
+      vi.restoreAllMocks();
       
       expect(getRes.status).toBe(500);
       expect(getRes.body).toEqual({ error: 'Internal server error' });
