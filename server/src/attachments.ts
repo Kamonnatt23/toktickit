@@ -75,9 +75,18 @@ router.post("/", requireAuth, async (req: Request, res: Response): Promise<any> 
       return res.status(404).json({ error: "Ticket not found" });
     }
 
-    if (ticket.requesterId !== requesterId) {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Administrator') {
       if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: "Forbidden: Not your ticket" });
+      return res.status(403).json({ error: "Forbidden: Administrators cannot manage attachments" });
+    }
+    if (user.role === 'Requester' && ticket.requesterId !== user.id) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: "Ticket not found" }); // Non-enumeration
+    }
+    if (user.role === 'IT Staff' && ticket.ownerId !== null && ticket.ownerId !== user.id) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ error: "Forbidden: Not authorized to operate on this ticket" });
     }
 
     if (ticket.attachments.length >= 5) {
@@ -101,15 +110,13 @@ router.post("/", requireAuth, async (req: Request, res: Response): Promise<any> 
     if (err.message === 'Invalid file type' || err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ error: "Invalid file type or size exceeded" });
     }
-    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.get('/:id', async (req: Request, res: Response): Promise<any> => {
+router.get('/:id', requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const auth = await authRequester(req, res);
-    if ('error' in auth) return res.status(auth.error).json({ error: auth.message });
-
+    const user = (req as AuthenticatedRequest).user!;
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
 
@@ -119,8 +126,12 @@ router.get('/:id', async (req: Request, res: Response): Promise<any> => {
     });
 
     if (!attachment) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
-      return res.status(403).json({ error: "Forbidden" });
+    
+    if (attachment.ticket) {
+      if (user.role === 'Requester' && attachment.ticket.requesterId !== user.id) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      // IT Staff and Admin have read access, so they are allowed to view metadata.
     }
 
     return res.status(200).json({
@@ -132,13 +143,13 @@ router.get('/:id', async (req: Request, res: Response): Promise<any> => {
       isDeleted: attachment.isDeleted
     });
   } catch (err) {
-    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.get("/:id/download", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
+    const user = (req as AuthenticatedRequest).user!;
 
     const id = parseInt(req.params.id, 10);
     const attachment = await getPrisma().attachment.findUnique({
@@ -147,8 +158,12 @@ router.get("/:id/download", requireAuth, async (req: Request, res: Response): Pr
     });
 
     if (!attachment || attachment.isDeleted) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
-      return res.status(403).json({ error: "Forbidden" });
+    
+    if (attachment.ticket) {
+      if (user.role === 'Requester' && attachment.ticket.requesterId !== user.id) {
+        return res.status(404).json({ error: "Not found" }); // Non-enumeration
+      }
+      // IT Staff and Admin have read-only access and can download attachments.
     }
 
     const filePath = path.join(uploadDir, attachment.filePath);
@@ -158,13 +173,13 @@ router.get("/:id/download", requireAuth, async (req: Request, res: Response): Pr
     res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
-    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.delete('/:id', requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
-    const requesterId = (req as AuthenticatedRequest).user!.id;
+    const user = (req as AuthenticatedRequest).user!;
 
     const id = parseInt(req.params.id, 10);
     const attachment = await getPrisma().attachment.findUnique({
@@ -173,8 +188,18 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response): Promise<
     });
 
     if (!attachment || attachment.isDeleted) return res.status(404).json({ error: "Not found" });
-    if (attachment.ticket && attachment.ticket.requesterId !== requesterId) {
-      return res.status(403).json({ error: "Forbidden" });
+    
+    if (user.role === 'Administrator') {
+      return res.status(403).json({ error: "Forbidden: Administrators cannot manage attachments" });
+    }
+    
+    if (attachment.ticket) {
+      if (user.role === 'Requester' && attachment.ticket.requesterId !== user.id) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      if (user.role === 'IT Staff' && attachment.ticket.ownerId !== null && attachment.ticket.ownerId !== user.id) {
+        return res.status(403).json({ error: "Forbidden: Not authorized to operate on this ticket" });
+      }
     }
     
     // Some implementations might send it in body, some in query. Let's support body.
@@ -194,7 +219,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response): Promise<
 
     return res.status(204).send();
   } catch (err) {
-    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Server error", message: err.message || String(err) });
+    console.error("SERVER THROW:", err); return res.status(500).json({ error: "Internal server error" });
   }
 });
 
