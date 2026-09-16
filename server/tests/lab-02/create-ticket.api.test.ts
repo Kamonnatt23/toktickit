@@ -46,6 +46,27 @@ describe("Ticket APIs (Issue 3)", () => {
     expect(res.body.ticketNumber).toMatch(/^TKT-\d{3,}$/);
   });
 
+  
+  it("POST /api/tickets denies IT Staff", async () => {
+    const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+    const staffCookie = await authService.createSession(staffUser.id);
+    const res = await request(app)
+      .post("/api/tickets")
+      .set("Cookie", `sessionId=${staffCookie}`)
+      .send({ categoryId, relatedSystemId: systemId, summary: "Test", priority: "High", description: "Test" });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /api/tickets denies Administrator", async () => {
+    const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+    const adminCookie = await authService.createSession(adminUser.id);
+    const res = await request(app)
+      .post("/api/tickets")
+      .set("Cookie", `sessionId=${adminCookie}`)
+      .send({ categoryId, relatedSystemId: systemId, summary: "Test", priority: "High", description: "Test" });
+    expect(res.status).toBe(403);
+  });
+
   it("POST /api/tickets validates missing header", async () => {
     const res = await request(app)
       .post("/api/tickets")

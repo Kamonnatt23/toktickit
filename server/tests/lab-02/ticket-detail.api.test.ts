@@ -70,15 +70,15 @@ describe('GET /api/tickets/:id', () => {
     expect(res.body.category.name).toMatch(/Detail Cat/);
   });
 
-  it('returns 403 Forbidden if accessing someone elses ticket', async () => {
+  it('returns 404 Not Found if accessing someone elses ticket', async () => {
     // Requester A (otherRequesterId) owns Ticket A (otherTicketId)
     // Requester B (requesterId) requests Ticket A
     const res = await request(app).get('/api/tickets/' + otherTicketId)
       .set("Cookie", `sessionId=${sessionCookie}`)
       .set("X-Requester-Id", String(otherRequesterId)); // Try to spoof identity
     
-    // Assert response is 403 Forbidden
-    expect(res.status).toBe(403);
+    // Assert response is 404 Not Found
+    expect(res.status).toBe(404);
     
     // Assert Ticket A's data is not exposed
     expect(res.body).not.toHaveProperty('summary');

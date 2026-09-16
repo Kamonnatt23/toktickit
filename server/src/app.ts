@@ -85,8 +85,8 @@ app.get("/api/related-systems", async (_req: Request, res: Response) => {
 app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
-    if (user.role === 'Administrator') {
-      return res.status(403).json({ error: "Forbidden: Administrators cannot create tickets" });
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Only Requesters can create tickets" });
     }
     const requesterId = user.id;
 
@@ -183,10 +183,10 @@ app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promis
     const skip = (pageNum - 1) * limitNum;
 
     const whereClause: any = {};
-    if (user.role === 'Requester') {
-      whereClause.requesterId = user.id;
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Only Requesters can view this list" });
     }
-    // IT Staff and Admin can view all tickets in the list (Queue view placeholders)
+    whereClause.requesterId = user.id;
 
     if (status && status !== 'All') {
       whereClause.status = status;
@@ -263,9 +263,7 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
 
     // Ownership check (Crucial scope rule)
     if (user.role === 'Requester' && ticket.requesterId !== user.id) {
-      // Returning 404 for security obscurity or 403. Using 404 is generally better for obscurity, 
-      // but standard is 403. Let's return 403 as the prompt says "403 Forbidden (or 404 Not Found)"
-      return res.status(403).json({ error: "Forbidden: You do not have permission to access this ticket" });
+      return res.status(404).json({ error: "Ticket not found" });
     }
 
     const ticketNumber = `TKT-${String(ticket.id).padStart(3, '0')}`;

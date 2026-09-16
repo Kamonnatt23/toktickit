@@ -63,25 +63,20 @@ describe('GET /api/tickets', () => {
   });
 
   
-  it('allows IT Staff to view all tickets in queue', async () => {
+  
+  it('denies IT Staff from accessing Requester ticket list', async () => {
     const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
     const staffCookie = await authService.createSession(staffUser.id);
     const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${staffCookie}`);
-    expect(res.status).toBe(200);
-    // Should see both 'Fix router' and 'Secret ticket' since they see all
-    const summaries = res.body.data.map((t: any) => t.summary);
-    expect(summaries).toContain('Fix router');
-    expect(summaries).toContain('Secret ticket');
+    expect(res.status).toBe(403);
   });
 
-  it('allows Administrator to view all tickets', async () => {
+  it('denies Administrator from accessing Requester ticket list', async () => {
     const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
     const adminCookie = await authService.createSession(adminUser.id);
     const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${adminCookie}`);
-    expect(res.status).toBe(200);
-    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.status).toBe(403);
   });
-
 
   it('filters by status', async () => {
     const res = await request(app).get('/api/tickets?status=In Progress').set("Cookie", `sessionId=${sessionCookie}`);
