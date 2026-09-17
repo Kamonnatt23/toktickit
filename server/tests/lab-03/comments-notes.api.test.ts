@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
@@ -176,5 +176,30 @@ describe('Comments and Notes API', () => {
       .set('Cookie', `sessionId=${adminCookie}`)
       .send({ content: 'A note' });
     expect(res.status).toBe(403);
+  });
+
+  afterAll(async () => {
+    // Delete all child relations first to prevent foreign key constraint failures
+    const ticketIds = (await getPrisma().ticket.findMany({ where: { requesterId: reqId } })).map(t => t.id);
+
+    await getPrisma().publicComment.deleteMany({
+      where: { ticketId: { in: ticketIds } }
+    });
+
+    await getPrisma().internalNote.deleteMany({
+      where: { ticketId: { in: ticketIds } }
+    });
+
+    await getPrisma().ticket.deleteMany({
+      where: { requesterId: reqId }
+    });
+
+    await getPrisma().session.deleteMany({
+      where: { userId: { in: [reqId, staffId, adminId] } }
+    });
+
+    await getPrisma().user.deleteMany({
+      where: { id: { in: [reqId, staffId, adminId] } }
+    });
   });
 });
