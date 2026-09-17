@@ -52,12 +52,38 @@ describe('Comments and Notes API', () => {
   it('COMM-01, COMM-02: Public comment and Internal note immutability (append-only)', async () => {
     const ticket = await createTicket('In Progress', staffId);
     
+    // Create a real PublicComment
+    const originalCommentContent = 'Initial public comment';
+    const comment = await getPrisma().publicComment.create({
+      data: { ticketId: ticket.id, authorId: staffId, content: originalCommentContent }
+    });
+
+    // Create a real InternalNote
+    const originalNoteContent = 'Initial internal note';
+    const note = await getPrisma().internalNote.create({
+      data: { ticketId: ticket.id, authorId: staffId, content: originalNoteContent }
+    });
+
     // Attempting to PATCH or DELETE doesn't even exist, but if we hit the endpoints they should return 404
-    const resPatch = await request(app).patch(`/api/tickets/${ticket.id}/comments/1`).set('Cookie', `sessionId=${staffCookie}`);
+    const resPatch = await request(app)
+      .patch(`/api/tickets/${ticket.id}/comments/${comment.id}`)
+      .set('Cookie', `sessionId=${staffCookie}`)
+      .send({ content: 'Modified comment' });
     expect(resPatch.status).toBe(404);
 
-    const resDel = await request(app).delete(`/api/tickets/${ticket.id}/notes/1`).set('Cookie', `sessionId=${staffCookie}`);
+    const resDel = await request(app)
+      .delete(`/api/tickets/${ticket.id}/notes/${note.id}`)
+      .set('Cookie', `sessionId=${staffCookie}`);
     expect(resDel.status).toBe(404);
+
+    // Verify the records remain completely unchanged in the DB
+    const dbComment = await getPrisma().publicComment.findUnique({ where: { id: comment.id } });
+    expect(dbComment).not.toBeNull();
+    expect(dbComment?.content).toBe(originalCommentContent);
+
+    const dbNote = await getPrisma().internalNote.findUnique({ where: { id: note.id } });
+    expect(dbNote).not.toBeNull();
+    expect(dbNote?.content).toBe(originalNoteContent);
   });
 
   it('COMM-03: Requester triggers Appears Resolved on In Progress ticket', async () => {

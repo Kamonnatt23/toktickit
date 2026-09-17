@@ -428,7 +428,10 @@ app.patch("/api/staff/tickets/:id/status", requireAuth, async (req: Request, res
       const results = await getPrisma().$transaction(transactionOps);
       // The first operation is the ticket update
       if (Object.keys(updateData).length > 0) {
-        updatedTicket = results[0];
+        const firstResult = results[0];
+        if (firstResult && 'summary' in firstResult) {
+          updatedTicket = firstResult;
+        }
       }
     }
 
