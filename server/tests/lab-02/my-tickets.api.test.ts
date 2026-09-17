@@ -65,7 +65,7 @@ describe('GET /api/tickets', () => {
   
   
   it('denies IT Staff from accessing Requester ticket list', async () => {
-    const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+    const staffUser = await getPrisma().user.create({ data: { name: 'Staff', email: 'staff' + Date.now() + Math.random() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
     const staffCookie = await authService.createSession(staffUser.id);
     const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${staffCookie}`);
     expect(res.status).toBe(403);

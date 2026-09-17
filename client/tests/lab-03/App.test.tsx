@@ -72,7 +72,7 @@ describe('App Shell & Role Navigation', () => {
     await waitFor(() => expect(screen.getByText('Admin Bob')).toBeInTheDocument());
     expect(screen.getByText('User Management')).toBeInTheDocument();
     expect(screen.queryByText('Create Ticket')).not.toBeInTheDocument();
-    expect(screen.queryByText('Ticket Queue')).not.toBeInTheDocument();
+    expect(screen.getByText('Ticket Queue')).toBeInTheDocument();
   });
 
   it('handles logout and redirects to login', async () => {

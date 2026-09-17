@@ -21,16 +21,17 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **STAFF-04**| API | AC-08 | Assign ticket to inactive user or non-IT Staff | 400 Bad Request, assignment rejected | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | **STAFF-05**| API | AC-09 | Status transition validation | Invalid transitions return 400 Bad Request. Valid transitions missing required payload fields (reason/comment) return 400 Bad Request. Successful transitions generate corresponding Note/Comment. | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | **STAFF-06**| API | AC-07 | Staff queue assignees list | IT Staff list returned securely for filtering | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| **COMM-01** | API | AC-11 | Public comment immutability | Attempting to PATCH or DELETE a comment returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **COMM-02** | API | AC-11 | Internal note immutability | Attempting to PATCH or DELETE a note returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **COMM-03** | API | AC-12 | Requester triggers "Appears Resolved" on In Progress ticket | 201 Created, standardized comment appended, ticket status remains unchanged | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **COMM-04** | API | AC-12 | Requester triggers "Appears Resolved" on non-In Progress ticket | 400 Bad Request | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **COMM-05** | API | AC-10 | Requester posts comment on "Waiting for Requester" ticket | 201 Created, Ticket status automatically transitions to "Open" | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **COMM-06** | API | AC-10 | Requester posts comment on "Resolved" or "Closed" ticket | 201 Created, Ticket status automatically transitions to "Reopened" | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **NOTE-01** | API | AC-06 | Requester attempts to GET Internal Notes | 404 Not Found (or 403 Forbidden) | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **NOTE-02** | API | AC-06 | Requester attempts to POST Internal Note | 404 Not Found (or 403 Forbidden) | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **NOTE-03** | API | BR-03 | Administrator attempts to GET Internal Notes | 200 OK | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| **NOTE-04** | API | AC-11, BR-03 | Administrator attempts to POST Internal Note | 403 Forbidden | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
+| **COMM-01** | API | AC-11 | Public comment immutability | Attempting to PATCH or DELETE a comment returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-02** | API | AC-11 | Internal note immutability | Attempting to PATCH or DELETE a note returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-03** | API | AC-12 | Requester triggers "Appears Resolved" on In Progress ticket | 201 Created, standardized comment appended, ticket status remains unchanged | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-04** | API | AC-12 | Requester triggers "Appears Resolved" on non-In Progress ticket | 400 Bad Request | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-05** | API | AC-10 | Requester posts comment on "Waiting for Requester" ticket | 201 Created, Ticket status automatically transitions to "Open" | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-06** | API | AC-10 | Requester posts comment on "Resolved" or "Closed" ticket | 201 Created, Ticket status automatically transitions to "Reopened" | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **COMM-07** | API | AC-10 | IT Staff posts comment on "Waiting for Requester" ticket | 201 Created, Ticket status remains unchanged | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **NOTE-01** | API | AC-06 | Requester attempts to GET Internal Notes | 404 Not Found (or 403 Forbidden) | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **NOTE-02** | API | AC-06 | Requester attempts to POST Internal Note | 404 Not Found (or 403 Forbidden) | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **NOTE-03** | API | BR-03 | Administrator attempts to GET Internal Notes | 200 OK | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| **NOTE-04** | API | AC-11, BR-03 | Administrator attempts to POST Internal Note | 403 Forbidden | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | **ADMIN-01**| API | AC-13 | Admin creates user with duplicate email | 409 Conflict | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
 | **ADMIN-02**| API | AC-14 | Admin attempts self-deactivation | 400 Bad Request, operation aborted | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
 | **ADMIN-03**| API | AC-15 | Last active admin deactivation | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
