@@ -125,22 +125,31 @@ describe('Admin User Management API', () => {
   });
 
   it('ADMIN-03: Last active admin deactivation returns 400', async () => {
-    // Note: Deactivating the last active administrator implies deactivating oneself (as the requester must be an active admin).
-    // Thus, this logically unreachable production guard will naturally fall through to the self-deactivation 400 response.
-    // We document this distinction and safely verify the resulting HTTP 400 without needing fake coverage.
+    // 1. Create a distinct targetAdmin
+    const timestamp = Date.now();
+    const targetAdmin = await getPrisma().user.create({
+      data: { name: 'Target Admin', email: `targetadmin_${timestamp}@usersadmin.test.com`, passwordHash: 'hash', role: 'Administrator', isActive: true, requiresPasswordChange: false }
+    });
+
+    // 2. Authenticate as requesterAdmin (adminCookie is from adminId)
+    // 3. Spy on the Prisma count used by the guard to isolate the test from the shared database
     vi.spyOn(getPrisma().user, 'count').mockImplementation(async (args: any) => {
       if (args?.where?.role === 'Administrator' && args?.where?.isActive === true) return 1;
       return originalCount.call(getPrisma().user, args);
     });
 
+    // 4. Send PATCH targeting targetAdmin with isActive: false
     const res = await request(app)
-      .patch(`/api/admin/users/${adminId}`)
+      .patch(`/api/admin/users/${targetAdmin.id}`)
       .set('Cookie', `sessionId=${adminCookie}`)
       .send({ isActive: false });
 
+    // 5. Ensure the response is specifically the last-active-Administrator 400 error, not self-deactivation
     expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Cannot deactivate or change role of the last active Administrator/i);
 
-    const dbUser = await getPrisma().user.findUnique({ where: { id: adminId } });
+    // 6. Verify targetAdmin is still isActive: true
+    const dbUser = await getPrisma().user.findUnique({ where: { id: targetAdmin.id } });
     expect(dbUser?.isActive).toBe(true);
   });
 
@@ -158,6 +167,7 @@ describe('Admin User Management API', () => {
       .send({ role: 'Requester' });
 
     expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Cannot deactivate or change role of the last active Administrator/i);
 
     const dbUser = await getPrisma().user.findUnique({ where: { id: adminId } });
     expect(dbUser?.role).toBe('Administrator');
