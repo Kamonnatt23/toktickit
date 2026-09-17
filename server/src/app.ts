@@ -754,5 +754,196 @@ app.post("/api/tickets/:id/notes", requireAuth, async (req: AuthenticatedRequest
 });
 
 
+
+// ==========================================
+// Issue #9: Administrator User Management
+// ==========================================
+
+import { NextFunction } from 'express';
+
+const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+  const user = (req as AuthenticatedRequest).user;
+  if (user?.role !== 'Administrator') {
+    return res.status(403).json({ error: 'Administrators only' });
+  }
+  next();
+};
+
+// GET /api/admin/users
+app.get("/api/admin/users", requireAuth, requireAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { search, role } = req.query;
+    const whereClause: import('@prisma/client').Prisma.UserWhereInput = {};
+
+    if (search && typeof search === 'string') {
+      whereClause.OR = [
+        { name: { contains: search } },
+        { email: { contains: search } }
+      ];
+    }
+    if (role && typeof role === 'string' && role !== 'All') {
+      whereClause.role = role;
+    }
+
+    const users = await getPrisma().user.findMany({
+      where: whereClause,
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        requiresPasswordChange: true,
+        createdAt: true
+      }
+    });
+
+    return res.status(200).json({ data: users });
+  } catch (err) {
+    console.error("Error fetching users:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/admin/users
+app.post("/api/admin/users", requireAuth, requireAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { name, email, role, initialPassword, isActive } = req.body;
+
+    if (!name || !email || !role || !initialPassword) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    if (!['Requester', 'IT Staff', 'Administrator'].includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+
+    const existingUser = await getPrisma().user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(409).json({ error: "Email already exists" });
+    }
+
+    const bcrypt = require('bcrypt');
+    const passwordHash = await bcrypt.hash(initialPassword, 10);
+
+    const newUser = await getPrisma().user.create({
+      data: {
+        name,
+        email,
+        role,
+        passwordHash,
+        isActive: isActive !== undefined ? isActive : true,
+        requiresPasswordChange: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        requiresPasswordChange: true,
+        createdAt: true
+      }
+    });
+
+    return res.status(201).json(newUser);
+  } catch (err) {
+    console.error("Error creating user:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /api/admin/users/:id
+app.patch("/api/admin/users/:id", requireAuth, requireAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid user ID" });
+
+    const { name, email, role, isActive } = req.body;
+
+    const user = await getPrisma().user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (email && email !== user.email) {
+      const existingUser = await getPrisma().user.findUnique({ where: { email } });
+      if (existingUser) return res.status(409).json({ error: "Email already exists" });
+    }
+
+    if (role && !['Requester', 'IT Staff', 'Administrator'].includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+
+    const authReq = req as AuthenticatedRequest;
+
+    // Safety: Prevent self-deactivation
+    if (authReq.user!.id === id && isActive === false && user.isActive === true) {
+      return res.status(400).json({ error: "Cannot deactivate your own account" });
+    }
+
+    // Safety: Prevent last admin deactivation or role change
+    if ((isActive === false && user.isActive === true && user.role === 'Administrator') ||
+        (role && role !== 'Administrator' && user.role === 'Administrator' && user.isActive === true)) {
+      const activeAdminsCount = await getPrisma().user.count({
+        where: { role: 'Administrator', isActive: true }
+      });
+      if (activeAdminsCount <= 1) {
+        return res.status(400).json({ error: "Cannot deactivate or change role of the last active Administrator" });
+      }
+    }
+
+    const updatedUser = await getPrisma().user.update({
+      where: { id },
+      data: {
+        ...(name && { name }),
+        ...(email && { email }),
+        ...(role && { role }),
+        ...(isActive !== undefined && { isActive })
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        requiresPasswordChange: true,
+        createdAt: true
+      }
+    });
+
+    return res.status(200).json(updatedUser);
+  } catch (err) {
+    console.error("Error updating user:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/admin/users/:id/reset-password
+app.post("/api/admin/users/:id/reset-password", requireAuth, requireAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid user ID" });
+
+    const { newPassword } = req.body;
+    if (!newPassword) return res.status(400).json({ error: "New password is required" });
+
+    const user = await getPrisma().user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const bcrypt = require('bcrypt');
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await getPrisma().user.update({
+      where: { id },
+      data: { passwordHash, requiresPasswordChange: true }
+    });
+
+    return res.status(200).json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.error("Error resetting password:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default app;
 

@@ -72,7 +72,7 @@ describe('GET /api/tickets', () => {
   });
 
   it('denies Administrator from accessing Requester ticket list', async () => {
-    const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+    const adminUser = await getPrisma().user.create({ data: { name: 'Admin', email: 'admin' + Date.now() + Math.random().toString().slice(2,8) + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
     const adminCookie = await authService.createSession(adminUser.id);
     const res = await request(app).get('/api/tickets').set('Cookie', `sessionId=${adminCookie}`);
     expect(res.status).toBe(403);
