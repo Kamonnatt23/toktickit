@@ -35,6 +35,7 @@ describe('StaffQueue Component', () => {
     vi.clearAllMocks();
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
     });
   });
@@ -58,6 +59,7 @@ describe('StaffQueue Component', () => {
   it('renders empty state when no tickets', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => ({ data: [], pagination: { total: 0, page: 1, limit: 10, totalPages: 1 } }) };
     });
     renderWithContext({ id: 2, role: 'IT Staff', name: 'Staff' });
@@ -69,6 +71,7 @@ describe('StaffQueue Component', () => {
   it('renders error state on fetch failure', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       throw new Error('Network error');
     });
     renderWithContext({ id: 2, role: 'IT Staff', name: 'Staff' });
@@ -94,6 +97,7 @@ describe('StaffQueue Component', () => {
     mockFetch.mockClear();
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
     });
 
@@ -115,6 +119,7 @@ describe('StaffQueue Component', () => {
     mockFetch.mockClear();
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
     });
 
@@ -135,6 +140,7 @@ describe('StaffQueue Component', () => {
     mockFetch.mockClear();
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
     });
 
@@ -149,6 +155,7 @@ describe('StaffQueue Component', () => {
   it('handles assigned to filter interaction', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
     });
 
@@ -161,7 +168,15 @@ describe('StaffQueue Component', () => {
     mockFetch.mockClear();
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => defaultData };
+    });
+
+    // Select 'Another Staff' (id 3)
+    fireEvent.change(assigneeSelect!, { target: { value: '3' } });
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find((c: any) => c[0].includes('ownerId=3'));
+      expect(call).toBeTruthy();
     });
 
     // Select 'Unassigned'
@@ -179,6 +194,23 @@ describe('StaffQueue Component', () => {
     });
   });
 
+  it('hides Assigned to Me for Administrator', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }] }) };
+      return { ok: true, json: async () => defaultData };
+    });
+
+    renderWithContext({ id: 4, role: 'Administrator', name: 'Admin' });
+    
+    // Wait for the combobox to render
+    const assigneeSelect = (await screen.findAllByRole('combobox')).find((el: any) => el.innerHTML.includes('All Assignees'));
+    expect(assigneeSelect).toBeInTheDocument();
+    
+    // Administrator should NOT see 'Assigned to Me'
+    expect(screen.queryByRole('option', { name: 'Assigned to Me' })).not.toBeInTheDocument();
+  });
+
   it('handles page number interaction', async () => {
     // Modify defaultData temporarily to have 5 pages
     const multiPageData = {
@@ -188,6 +220,7 @@ describe('StaffQueue Component', () => {
 
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [{ id: 2, name: 'Staff', role: 'IT Staff' }, { id: 3, name: 'Another Staff', role: 'IT Staff' }] }) };
       return { ok: true, json: async () => multiPageData };
     });
 

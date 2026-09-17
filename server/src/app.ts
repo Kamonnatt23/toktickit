@@ -264,6 +264,25 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
 });
 
 
+app.get("/api/staff/users", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Requester') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const staffUsers = await getPrisma().user.findMany({
+      where: { role: 'IT Staff', isActive: true },
+      select: { id: true, name: true }
+    });
+
+    return res.status(200).json({ data: staffUsers });
+  } catch (err) {
+    console.error("Error fetching staff users:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;

@@ -37,15 +37,23 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
   const [total, setTotal] = useState(0);
 
   const [categories, setCategories] = useState<{id: number, name: string}[]>([]);
+  const [staffUsers, setStaffUsers] = useState<{id: number, name: string}[]>([]);
 
   useEffect(() => {
     const loadFilters = async () => {
       try {
         const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
-        const catRes = await fetch(`${API_URL}/api/categories`, { credentials: 'include' });
+        const [catRes, userRes] = await Promise.all([
+          fetch(`${API_URL}/api/categories`, { credentials: 'include' }),
+          fetch(`${API_URL}/api/staff/users`, { credentials: 'include' })
+        ]);
         
         if (catRes.ok) {
           setCategories(await catRes.json());
+        }
+        if (userRes.ok) {
+          const json = await userRes.json();
+          setStaffUsers(json.data || []);
         }
       } catch (err) {
         console.error("Failed to load filters", err);
@@ -232,7 +240,10 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
             <select className="form-select bg-light" value={ownerId} onChange={e => { setOwnerId(e.target.value); setPage(1); }}>
               <option value="All">All Assignees</option>
               <option value="Unassigned">Unassigned</option>
-              {user && <option value={String(user.id)}>Assigned to Me</option>}
+              {user?.role === 'IT Staff' && <option value={String(user.id)}>Assigned to Me</option>}
+              {staffUsers.filter(u => String(u.id) !== String(user?.id)).map(u => (
+                <option key={u.id} value={String(u.id)}>{u.name}</option>
+              ))}
             </select>
           </div>
           <div className="col-6 col-md-2">

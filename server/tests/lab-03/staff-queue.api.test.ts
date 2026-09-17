@@ -164,3 +164,63 @@ describe('GET /api/staff/tickets', () => {
     expect(res.body.data).toBeDefined();
   });
 });
+
+describe('GET /api/staff/users', () => {
+  let staffCookie: string;
+  let adminCookie: string;
+  let requesterCookie: string;
+  let createdUserIds: number[] = [];
+
+  beforeAll(async () => {
+    const reqUser = await getPrisma().user.create({ data: { name: 'Req User 2', email: 'req2' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
+    requesterCookie = await authService.createSession(reqUser.id);
+    createdUserIds.push(reqUser.id);
+
+    const staffUser = await getPrisma().user.create({ data: { name: 'Active Staff 2', email: 'staff2' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false, isActive: true } });
+    staffCookie = await authService.createSession(staffUser.id);
+    createdUserIds.push(staffUser.id);
+
+    const inactiveStaffUser = await getPrisma().user.create({ data: { name: 'Inactive Staff', email: 'instaff' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false, isActive: false } });
+    createdUserIds.push(inactiveStaffUser.id);
+
+    const adminUser = await getPrisma().user.create({ data: { name: 'Admin User 2', email: 'admin2' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+    adminCookie = await authService.createSession(adminUser.id);
+    createdUserIds.push(adminUser.id);
+  });
+
+  afterAll(async () => {
+    try {
+      if (createdUserIds.length > 0) {
+        await getPrisma().session.deleteMany({ where: { userId: { in: createdUserIds } } });
+        await getPrisma().user.deleteMany({ where: { id: { in: createdUserIds } } });
+      }
+    } catch (err) {
+      console.error('Cleanup failed:', err);
+    }
+  });
+
+  it('denies unauthenticated access with 401', async () => {
+    const res = await request(app).get('/api/staff/users');
+    expect(res.status).toBe(401);
+  });
+
+  it('denies Requester access', async () => {
+    const res = await request(app).get('/api/staff/users').set('Cookie', `sessionId=${requesterCookie}`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Forbidden/);
+  });
+
+  it('allows IT Staff and Administrator access, returning only active IT Staff', async () => {
+    // IT Staff
+    let res = await request(app).get('/api/staff/users').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.some((u: any) => u.name === 'Active Staff 2')).toBe(true);
+    expect(res.body.data.some((u: any) => u.name === 'Inactive Staff')).toBe(false);
+
+    // Administrator
+    res = await request(app).get('/api/staff/users').set('Cookie', `sessionId=${adminCookie}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.some((u: any) => u.name === 'Active Staff 2')).toBe(true);
+  });
+});
