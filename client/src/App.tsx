@@ -8,6 +8,7 @@ import { MyTickets } from "./components/MyTickets";
 import { TicketDetail } from "./components/TicketDetail";
 import { StaffQueue } from "./components/StaffQueue";
 import { StaffTicketDetail } from "./components/StaffTicketDetail";
+import UserManagement from "./components/UserManagement";
 
 function AppContent() {
   const { user, isLoading, logout } = useAuth();
@@ -138,7 +139,7 @@ function AppContent() {
         {activeTab === 'detail' && selectedTicketId && user.role === 'Requester' && <TicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
           {activeTab === 'detail' && selectedTicketId && (user.role === 'IT Staff' || user.role === 'Administrator') && <StaffTicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
         {activeTab === 'queue' && (user.role === 'IT Staff' || user.role === 'Administrator') && <StaffQueue onTicketClick={handleTicketClick} />}
-        {activeTab === 'users' && user.role === 'Administrator' && <div className="text-center mt-5 text-muted"><h4>User Management (Not Implemented)</h4></div>}
+        {activeTab === 'users' && user.role === 'Administrator' && <UserManagement />}
       </div>
     </>
   );

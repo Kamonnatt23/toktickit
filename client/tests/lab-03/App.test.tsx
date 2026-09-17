@@ -70,7 +70,7 @@ describe('App Shell & Role Navigation', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText('Admin Bob')).toBeInTheDocument());
-    expect(screen.getByText('User Management')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'User Management' })).toBeInTheDocument();
     expect(screen.queryByText('Create Ticket')).not.toBeInTheDocument();
     expect(screen.getByText('Ticket Queue')).toBeInTheDocument();
   });

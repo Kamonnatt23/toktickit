@@ -32,16 +32,16 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **NOTE-02** | API | AC-06 | Requester attempts to POST Internal Note | 404 Not Found (or 403 Forbidden) | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | **NOTE-03** | API | BR-03 | Administrator attempts to GET Internal Notes | 200 OK | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | **NOTE-04** | API | AC-11, BR-03 | Administrator attempts to POST Internal Note | 403 Forbidden | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
-| **ADMIN-01**| API | AC-13 | Admin creates user with duplicate email | 409 Conflict | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| **ADMIN-02**| API | AC-14 | Admin attempts self-deactivation | 400 Bad Request, operation aborted | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| **ADMIN-03**| API | AC-15 | Last active admin deactivation | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| **ADMIN-04**| API | AC-15 | Last active admin role change | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
+| **ADMIN-01**| API | AC-13 | Admin creates user with duplicate email | 409 Conflict | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| **ADMIN-02**| API | AC-14 | Admin attempts self-deactivation | 400 Bad Request, operation aborted | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| **ADMIN-03**| API | AC-15 | Last active admin deactivation | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| **ADMIN-04**| API | AC-15 | Last active admin role change | 400 Bad Request, system refuses | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | **MIG-01**  | API | AC-16 | Data migration and regression | Verify existing Lab 2 Tickets and Attachments still exist, relationships and ownership remain intact without data loss, and endpoints work with session auth | `server/tests/lab-03/authorization.api.test.ts` | Planned |
 | **UI-01**   | UI Component | AC-01, AC-02 | Login form rendering and validation | Renders properly, validates empty fields, shows error state safely | `client/src/components/Login.test.tsx` | Planned |
 | **UI-02**   | UI Component | AC-03 | Change password form boundaries | Validates matching passwords, loading state during save | `client/src/components/ChangePassword.test.tsx` | Planned |
 | **UI-03**   | UI Component | AC-07 | Staff Ticket Queue table | Renders data, triggers search/sort callbacks | `client/src/components/StaffTicketQueue.test.tsx` | Planned |
 | **UI-04**   | UI Component | AC-08, AC-09 | Staff Ticket Detail controls | Status dropdown disables invalid options based on matrix | `client/src/components/StaffTicketDetail.test.tsx` | Planned |
-| **UI-05**   | UI Component | AC-13, AC-14 | Admin User Management | Modal renders, handles duplicate email 409 conflict state gracefully | `client/src/components/UserManagement.test.tsx` | Planned |
+| **UI-05**   | UI Component | AC-13, AC-14 | Admin User Management | Modal renders, handles duplicate email 409 conflict state gracefully | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | **E2E-01**  | E2E | AC-01, AC-04, AC-05 | Full Authentication lifecycle | Logs in, navigates role-specific UI, blocks URL hopping (404), logs out | `client/e2e/lab-03/authentication.spec.ts` | Planned |
 | **E2E-02**  | E2E | AC-07, AC-08, AC-09 | Staff workflow end-to-end | Staff logs in, searches queue, claims ticket, updates status, adds note | `client/e2e/lab-03/staff-ticket-flow.spec.ts` | Planned |
 | **E2E-03**  | E2E | AC-13, AC-15 | User Administration | Admin logs in, creates Staff user, safely fails self-deactivation | `client/e2e/lab-03/user-administration.spec.ts` | Planned |
