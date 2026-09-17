@@ -312,5 +312,21 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       expect(comments[0].content).toBe('Resolution details here');
       expect(comments[0].authorId).toBe(staff1Id);
     });
+
+    it('rejects assignment to ownerId 0', async () => {
+      const ticket = await createTicket('New', null);
+      
+      const res = await request(app)
+        .patch(`/api/staff/tickets/${ticket.id}/assign`)
+        .set('Cookie', `sessionId=${staffCookie1}`)
+        .send({ ownerId: 0 });
+      
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/active IT Staff/);
+
+      // Verify ownerId remains unchanged
+      const updatedTicket = await getPrisma().ticket.findUnique({ where: { id: ticket.id } });
+      expect(updatedTicket?.ownerId).toBeNull();
+    });
   });
 });

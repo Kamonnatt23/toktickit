@@ -288,7 +288,7 @@ app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res
       return res.status(404).json({ error: "Ticket not found" });
     }
 
-    if (ownerId) {
+    if (ownerId !== null && ownerId !== undefined) {
       const targetUser = await getPrisma().user.findUnique({ where: { id: ownerId } });
       if (!targetUser || targetUser.role !== 'IT Staff' || !targetUser.isActive) {
         return res.status(400).json({ error: "Target owner must be an active IT Staff user" });
