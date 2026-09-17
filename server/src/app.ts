@@ -561,5 +561,195 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
   }
 });
 
+
+
+// ==========================================
+// Issue #8: Communication (Comments & Notes)
+// ==========================================
+
+// GET /api/tickets/:id/comments
+app.get("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    // Requester non-enumeration isolation
+    if (req.user!.role === 'Requester' && ticket.requesterId !== req.user!.id) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const comments = await getPrisma().publicComment.findMany({
+      where: { ticketId },
+      include: { author: { select: { id: true, name: true, role: true } } },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return res.status(200).json(comments);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/tickets/:id/comments
+app.post("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role === 'Administrator') {
+      return res.status(403).json({ error: "Administrators cannot post comments" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
+
+    const { content } = req.body;
+    if (!content || typeof content !== 'string' || content.trim() === '') {
+      return res.status(400).json({ error: "Content is required" });
+    }
+    if (content.length > 2000) {
+      return res.status(400).json({ error: "Content must not exceed 2000 characters" });
+    }
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    if (req.user!.role === 'Requester' && ticket.requesterId !== req.user!.id) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    // Determine if auto-transition is needed
+    let newStatus = ticket.status;
+    if (req.user!.role === 'Requester') {
+      if (ticket.status === 'Waiting for Requester') newStatus = 'Open';
+      else if (ticket.status === 'Resolved' || ticket.status === 'Closed') newStatus = 'Reopened';
+    }
+
+    const comment = await getPrisma().$transaction(async (tx) => {
+      const created = await tx.publicComment.create({
+        data: {
+          content: content.trim(),
+          ticketId,
+          authorId: req.user!.id
+        },
+        include: { author: { select: { id: true, name: true, role: true } } }
+      });
+
+      if (newStatus !== ticket.status) {
+        await tx.ticket.update({
+          where: { id: ticketId },
+          data: { status: newStatus }
+        });
+      }
+      return created;
+    });
+
+    return res.status(201).json(comment);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/tickets/:id/appears-resolved
+app.post("/api/tickets/:id/appears-resolved", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'Requester') {
+      return res.status(403).json({ error: "Only Requesters can use this endpoint" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket || ticket.requesterId !== req.user!.id) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    if (ticket.status !== 'In Progress') {
+      return res.status(400).json({ error: "Ticket must be In Progress to use appears-resolved" });
+    }
+
+    const comment = await getPrisma().publicComment.create({
+      data: {
+        content: "The requester has indicated that the problem appears resolved.",
+        ticketId,
+        authorId: req.user!.id
+      },
+      include: { author: { select: { id: true, name: true, role: true } } }
+    });
+
+    return res.status(201).json(comment);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/tickets/:id/notes
+app.get("/api/tickets/:id/notes", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role === 'Requester') {
+      return res.status(403).json({ error: "Requesters cannot access internal notes" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    const notes = await getPrisma().internalNote.findMany({
+      where: { ticketId },
+      include: { author: { select: { id: true, name: true, role: true } } },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return res.status(200).json(notes);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/tickets/:id/notes
+app.post("/api/tickets/:id/notes", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user!.role !== 'IT Staff') {
+      return res.status(403).json({ error: "Only IT Staff can post internal notes" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
+
+    const { content } = req.body;
+    if (!content || typeof content !== 'string' || content.trim() === '') {
+      return res.status(400).json({ error: "Content is required" });
+    }
+    if (content.length > 2000) {
+      return res.status(400).json({ error: "Content must not exceed 2000 characters" });
+    }
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    const note = await getPrisma().internalNote.create({
+      data: {
+        content: content.trim(),
+        ticketId,
+        authorId: req.user!.id
+      },
+      include: { author: { select: { id: true, name: true, role: true } } }
+    });
+
+    return res.status(201).json(note);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 export default app;
 

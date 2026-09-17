@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
+import { CommunicationArea } from './CommunicationArea';
 
 interface TicketDetailProps {
   ticketId: number;

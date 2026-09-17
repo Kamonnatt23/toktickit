@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
+import { CommunicationArea } from './CommunicationArea';
 
 interface StaffTicketDetailProps {
   ticketId: number;
@@ -213,9 +214,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
               </div>
             )}
             
-            <div className="mt-4 p-4 border rounded bg-white text-center text-muted">
-              <em>Communication area (Issue #8) not implemented yet.</em>
-            </div>
+            <CommunicationArea ticketId={ticket.id} ticketStatus={ticket.status} onUpdate={fetchTicket} />
           </div>
           
           <div className="col-md-4">
