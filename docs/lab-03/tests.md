@@ -20,6 +20,7 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **STAFF-03**| API | AC-08 | Claim and Reassign ticket to active IT Staff | Owner updates successfully to provided IT Staff ID | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
 | **STAFF-04**| API | AC-08 | Assign ticket to inactive user or non-IT Staff | 400 Bad Request, assignment rejected | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
 | **STAFF-05**| API | AC-09 | Status transition validation | Invalid transitions (e.g., New to Resolved directly) return 400 Bad Request | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
+| **STAFF-06**| API | AC-07 | Staff queue assignees list | IT Staff list returned securely for filtering | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
 | **COMM-01** | API | AC-11 | Public comment immutability | Attempting to PATCH or DELETE a comment returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
 | **COMM-02** | API | AC-11 | Internal note immutability | Attempting to PATCH or DELETE a note returns 404/403 | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
 | **COMM-03** | API | AC-12 | Requester triggers "Appears Resolved" on In Progress ticket | 201 Created, standardized comment appended, ticket status remains unchanged | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |

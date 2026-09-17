@@ -90,6 +90,14 @@
 
 ### 3.3 IT Staff Ticket Operations
 
+#### GET `/api/staff/users`
+*   **Purpose:** Fetch a minimal, read-only list of active IT Staff to populate the Staff Queue "Assigned To" filter.
+*   **Auth Requirement:** Required.
+*   **Permitted Roles:** IT Staff, Administrator (read-only queue access).
+*   **Response Shape:** `{ "data": [ { "id": 12, "name": "Staff A" }, { "id": 15, "name": "Staff B" } ] }` (Returns strictly active users with role `IT Staff`. No sensitive fields).
+*   **Success Status:** `200 OK`.
+*   **Errors:** `401` (unauthenticated), `403` (forbidden for Requesters).
+
 #### GET `/api/staff/tickets`
 *   **Purpose:** Fetch shared ticket queue.
 *   **Auth Requirement:** Required.

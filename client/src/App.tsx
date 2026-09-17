@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SystemStatus } from "./components/SystemStatus";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { Login } from "./components/Login";
@@ -6,11 +6,19 @@ import { ChangePassword } from "./components/ChangePassword";
 import { CreateTicket } from "./components/CreateTicket";
 import { MyTickets } from "./components/MyTickets";
 import { TicketDetail } from "./components/TicketDetail";
+import { StaffQueue } from "./components/StaffQueue";
 
 function AppContent() {
   const { user, isLoading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail' | 'queue' | 'users'>('create');
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      if (user.role === 'IT Staff' && activeTab === 'create') setActiveTab('queue');
+      if (user.role === 'Administrator' && activeTab === 'create') setActiveTab('users');
+    }
+  }, [user]);
 
   const handleTicketClick = (id: number) => {
     setSelectedTicketId(id);
@@ -84,13 +92,22 @@ function AppContent() {
               )}
 
               {user.role === 'Administrator' && (
-                <button 
-                  className={`btn ${activeTab === 'users' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                  style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'users' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'users' ? 'white' : '#006B3C' }}
-                  onClick={() => setActiveTab('users')}
-                >
-                  User Management
-                </button>
+                <>
+                  <button 
+                    className={`btn ${activeTab === 'users' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
+                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'users' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'users' ? 'white' : '#006B3C' }}
+                    onClick={() => setActiveTab('users')}
+                  >
+                    User Management
+                  </button>
+                  <button 
+                    className={`btn ${(activeTab === 'queue' || activeTab === 'detail') ? 'btn-success fw-bold' : 'btn-outline-success'}`}
+                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: (activeTab === 'queue' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'queue' || activeTab === 'detail') ? 'white' : '#006B3C' }}
+                    onClick={() => setActiveTab('queue')}
+                  >
+                    Ticket Queue
+                  </button>
+                </>
               )}
             </SystemStatus>
           </div>
@@ -114,11 +131,11 @@ function AppContent() {
         </div>
       </nav>
 
-      <div className="container position-relative mt-5 pt-4 pb-5" style={{ maxWidth: 800 }}>
+      <div className="container position-relative mt-5 pt-4 pb-5" style={{ maxWidth: 1000 }}>
         {activeTab === 'create' && user.role === 'Requester' && <CreateTicket />}
         {activeTab === 'list' && user.role === 'Requester' && <MyTickets onTicketClick={handleTicketClick} />}
         {activeTab === 'detail' && selectedTicketId && <TicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
-        {activeTab === 'queue' && user.role === 'IT Staff' && <div className="text-center mt-5 text-muted"><h4>Staff Queue (Not Implemented)</h4></div>}
+        {activeTab === 'queue' && (user.role === 'IT Staff' || user.role === 'Administrator') && <StaffQueue onTicketClick={handleTicketClick} />}
         {activeTab === 'users' && user.role === 'Administrator' && <div className="text-center mt-5 text-muted"><h4>User Management (Not Implemented)</h4></div>}
       </div>
     </>
