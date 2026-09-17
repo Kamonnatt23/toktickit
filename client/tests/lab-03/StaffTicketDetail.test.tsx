@@ -60,7 +60,7 @@ describe('StaffTicketDetail Component', () => {
   it('renders read-only fields for IT Staff', async () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
     setupMockFetch();
-    
+
     await act(async () => {
       render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
     });
@@ -73,7 +73,7 @@ describe('StaffTicketDetail Component', () => {
   it('allows Claiming ticket', async () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
     setupMockFetch();
-    
+
     await act(async () => {
       render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
     });
@@ -95,37 +95,55 @@ describe('StaffTicketDetail Component', () => {
       method: 'PATCH',
       body: JSON.stringify({ ownerId: 10 })
     }));
+
+    // Verify refetch was called
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/tickets/1'), expect.objectContaining({
+      credentials: 'include'
+    }));
+
+    // Verify related data is still rendered
+    expect(screen.getByText('Bob')).toBeDefined();
+    expect(screen.getByText('Hardware')).toBeDefined();
   });
 
-  it('prevents Administrator from seeing operational controls', async () => {
+  it('prevents Administrator from seeing operational controls but allows viewing data', async () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 99, role: 'Administrator' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
     setupMockFetch();
-    
+
     await act(async () => {
       render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
     });
 
+    // B. Verify Admin can view normal ticket information
     expect(screen.getByText('TKT-0001')).toBeDefined();
-    
-    // Should NOT have claim button
+    expect(screen.getByText('Bob')).toBeDefined(); // Requester
+    expect(screen.getByText('Hardware')).toBeDefined(); // Category
+    expect(screen.getAllByText('Medium').length).toBeGreaterThan(0); // Priority
+    expect(screen.getByText('Unassigned')).toBeDefined(); // Owner
+
+    // C. Verify Admin does NOT see mutation controls
     expect(screen.queryByText('Claim Ticket')).toBeNull();
-    // Should NOT have status update select (wait, they can see current status, but not the select)
     expect(screen.queryByText('Update Status')).toBeNull();
+
+    // Check for absences of dropdowns that would allow IT Priority/Assign
+    // The component renders standard divs for these when not staff
+    const selects = screen.queryAllByRole('combobox');
+    expect(selects.length).toBe(0);
   });
 
   it('shows required comment area for transitions', async () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
     setupMockFetch({ ...mockTicket, status: 'In Progress', ownerId: 10 });
-    
+
     await act(async () => {
       render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
     });
 
-     
+
     // there are multiple selects, let's find the status one
     const selects = screen.getAllByRole('combobox');
     const statusSelect = selects[2]; // 0: IT Priority, 1: Assignee, 2: Status
-    
+
     await act(async () => {
       fireEvent.change(statusSelect, { target: { value: 'Resolved' } });
     });

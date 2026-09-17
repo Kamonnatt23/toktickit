@@ -103,7 +103,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to assign ticket');
       setSuccessMsg('Ticket assigned successfully');
-      setTicket(data);
+      await fetchTicket();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -129,7 +129,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update status');
       setSuccessMsg('Status updated successfully');
-      setTicket(data);
+      await fetchTicket();
       setTransitionComment('');
       setTransitionReason('');
     } catch (err: any) {
@@ -152,7 +152,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update priority');
       setSuccessMsg('Priority updated successfully');
-      setTicket(data);
+      await fetchTicket();
     } catch (err: any) {
       setError(err.message);
     }

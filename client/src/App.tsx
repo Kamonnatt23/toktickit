@@ -136,7 +136,7 @@ function AppContent() {
         {activeTab === 'create' && user.role === 'Requester' && <CreateTicket />}
         {activeTab === 'list' && user.role === 'Requester' && <MyTickets onTicketClick={handleTicketClick} />}
         {activeTab === 'detail' && selectedTicketId && user.role === 'Requester' && <TicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
-          {activeTab === 'detail' && selectedTicketId && user.role === 'IT Staff' && <StaffTicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
+          {activeTab === 'detail' && selectedTicketId && (user.role === 'IT Staff' || user.role === 'Administrator') && <StaffTicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />}
         {activeTab === 'queue' && (user.role === 'IT Staff' || user.role === 'Administrator') && <StaffQueue onTicketClick={handleTicketClick} />}
         {activeTab === 'users' && user.role === 'Administrator' && <div className="text-center mt-5 text-muted"><h4>User Management (Not Implemented)</h4></div>}
       </div>

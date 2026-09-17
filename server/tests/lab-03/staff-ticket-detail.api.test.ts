@@ -12,7 +12,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
   let staffCookie2: string;
   let adminCookie: string;
   let requesterCookie: string;
-  
+
   let staff1Id: number;
   let staff2Id: number;
   let adminId: number;
@@ -20,7 +20,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
   let inactiveStaffId: number;
   let categoryId: number;
   let systemId: number;
-  
+
   let createdUserIds: number[] = [];
   let createdTicketIds: number[] = [];
   let createdCommentIds: number[] = [];
@@ -91,7 +91,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
         .patch(`/api/staff/tickets/${ticket.id}/assign`)
         .set('Cookie', `sessionId=${staffCookie1}`)
         .send({ ownerId: staff2Id });
-      
+
       expect(res.status).toBe(200);
       expect(res.body.ownerId).toBe(staff2Id);
     });
@@ -106,14 +106,14 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const ticket = await createTicket('New', null);
       let res = await request(app).patch(`/api/staff/tickets/${ticket.id}/assign`).set('Cookie', `sessionId=${requesterCookie}`).send({ ownerId: staff2Id });
       expect(res.status).toBe(403);
-      
+
       res = await request(app).patch(`/api/staff/tickets/${ticket.id}/assign`).set('Cookie', `sessionId=${adminCookie}`).send({ ownerId: staff2Id });
       expect(res.status).toBe(403);
     });
 
     it('rejects assignment to inactive or non-IT Staff', async () => {
       const ticket = await createTicket('New', null);
-      
+
       // Inactive
       let res = await request(app).patch(`/api/staff/tickets/${ticket.id}/assign`).set('Cookie', `sessionId=${staffCookie1}`).send({ ownerId: inactiveStaffId });
       expect(res.status).toBe(400);
@@ -131,7 +131,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
         .send({ itPriority: 'Critical' });
-      
+
       expect(res.status).toBe(200);
       expect(res.body.itPriority).toBe('Critical');
       expect(res.body.status).toBe('New'); // unchanged
@@ -143,7 +143,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
         .send({ itPriority: 'SuperHigh' });
-      
+
       expect(res.status).toBe(400);
     });
 
@@ -153,7 +153,7 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
         .send({ status: 'Resolved' }); // New to Resolved directly is invalid
-      
+
       expect(res.status).toBe(400);
     });
 
@@ -162,8 +162,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Open' }); 
-      
+        .send({ status: 'Open' });
+
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/claimed\/assigned/i);
     });
@@ -173,8 +173,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Open' }); 
-      
+        .send({ status: 'Open' });
+
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Open');
     });
@@ -184,8 +184,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Cancelled' }); 
-      
+        .send({ status: 'Cancelled' });
+
       expect(res.status).toBe(400);
     });
 
@@ -194,10 +194,10 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Cancelled', reason: 'Spam ticket' }); 
-      
+        .send({ status: 'Cancelled', reason: 'Spam ticket' });
+
       expect(res.status).toBe(200);
-      
+
       const notes = await getPrisma().internalNote.findMany({ where: { ticketId: ticket.id } });
       expect(notes.length).toBe(1);
       expect(notes[0].content).toMatch(/Spam ticket/);
@@ -208,8 +208,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Waiting for Requester' }); 
-      
+        .send({ status: 'Waiting for Requester' });
+
       expect(res.status).toBe(400);
     });
 
@@ -218,8 +218,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Waiting for Requester', comment: 'Need more info' }); 
-      
+        .send({ status: 'Waiting for Requester', comment: 'Need more info' });
+
       expect(res.status).toBe(200);
 
       const comments = await getPrisma().publicComment.findMany({ where: { ticketId: ticket.id } });
@@ -229,13 +229,13 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
 
     it('rejects Requester and Administrator for status updates', async () => {
       const ticket = await createTicket('New', staff1Id);
-      
+
       let res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${requesterCookie}`)
         .send({ status: 'Open' });
       expect(res.status).toBe(403);
-      
+
       res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${adminCookie}`)
@@ -248,8 +248,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Reopened' }); 
-      
+        .send({ status: 'Reopened' });
+
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/Invalid transition/);
     });
@@ -259,8 +259,8 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
       const res = await request(app)
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
-        .send({ status: 'Reopened' }); 
-      
+        .send({ status: 'Reopened' });
+
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('Reopened');
     });
@@ -271,9 +271,46 @@ describe('Staff Ticket Operations (Assign & Status)', () => {
         .patch(`/api/staff/tickets/${ticket.id}/status`)
         .set('Cookie', `sessionId=${staffCookie1}`)
         .send({ status: 'In Progress' });
-      
+
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/assigned/);
+    });
+
+    it('In Progress -> Resolved without comment fails', async () => {
+      const ticket = await createTicket('In Progress', staff1Id);
+
+      const res = await request(app)
+        .patch(`/api/staff/tickets/${ticket.id}/status`)
+        .set('Cookie', `sessionId=${staffCookie1}`)
+        .send({ status: 'Resolved' }); // missing comment
+
+      expect(res.status).toBe(400);
+
+      // Ensure status unchanged
+      const updatedTicket = await getPrisma().ticket.findUnique({ where: { id: ticket.id } });
+      expect(updatedTicket?.status).toBe('In Progress');
+
+      // Ensure no comment created
+      const comments = await getPrisma().publicComment.findMany({ where: { ticketId: ticket.id } });
+      expect(comments.length).toBe(0);
+    });
+
+    it('In Progress -> Resolved with comment succeeds and creates PublicComment', async () => {
+      const ticket = await createTicket('In Progress', staff1Id);
+
+      const res = await request(app)
+        .patch(`/api/staff/tickets/${ticket.id}/status`)
+        .set('Cookie', `sessionId=${staffCookie1}`)
+        .send({ status: 'Resolved', comment: 'Resolution details here' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('Resolved');
+
+      // Verify exactly the expected PublicComment is created
+      const comments = await getPrisma().publicComment.findMany({ where: { ticketId: ticket.id } });
+      expect(comments.length).toBe(1);
+      expect(comments[0].content).toBe('Resolution details here');
+      expect(comments[0].authorId).toBe(staff1Id);
     });
   });
 });

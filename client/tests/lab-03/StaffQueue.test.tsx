@@ -195,7 +195,7 @@ describe('StaffQueue Component', () => {
   });
 
 
-  it('prevents Administrator from triggering ticket detail navigation', async () => {
+  it('allows Administrator to trigger ticket detail navigation', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };
       if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [] }) };
@@ -212,7 +212,7 @@ describe('StaffQueue Component', () => {
     const dataRow = rows[1]; // First row is header
     
     fireEvent.click(dataRow);
-    expect(onTicketClick).not.toHaveBeenCalled();
+    expect(onTicketClick).toHaveBeenCalledWith(1);
   });
 
   it('hides Assigned to Me for Administrator', async () => {
