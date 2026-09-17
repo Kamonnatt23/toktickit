@@ -194,6 +194,27 @@ describe('StaffQueue Component', () => {
     });
   });
 
+
+  it('allows Administrator to trigger ticket detail navigation', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('categories')) return { ok: true, json: async () => [] };
+      if (url.includes('staff/users')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: true, json: async () => defaultData }; // Returns 3 tickets
+    });
+
+    const onTicketClick = vi.fn();
+    (useAuth as any).mockReturnValue({ user: { id: 4, role: 'Administrator', name: 'Admin' }, isLoading: false });
+    
+    render(<StaffQueue onTicketClick={onTicketClick} />);
+
+    // Wait for the rows to render
+    const rows = await screen.findAllByRole('row');
+    const dataRow = rows[1]; // First row is header
+    
+    fireEvent.click(dataRow);
+    expect(onTicketClick).toHaveBeenCalledWith(1);
+  });
+
   it('hides Assigned to Me for Administrator', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('categories')) return { ok: true, json: async () => [] };

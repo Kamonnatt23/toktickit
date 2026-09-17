@@ -115,12 +115,25 @@
 *   **Errors:** `400` (invalid owner ID, owner not active IT Staff), `403` (forbidden for Requesters/Admins), `404` (not found).
 
 #### PATCH `/api/staff/tickets/:id/status`
-*   **Purpose:** Update ticket status (and IT Priority).
+*   **Purpose:** Update ticket status and/or IT Priority. Required state transition conditions are atomically fulfilled by this endpoint without requiring separate API calls to the Comments/Notes endpoints.
 *   **Auth Requirement:** Required.
 *   **Permitted Roles:** IT Staff. (Administrators and Requesters denied).
-*   **Request Shape:** `{ "status": "In Progress", "itPriority": "High" }`
-*   **Success Status:** `200 OK`.
-*   **Errors:** `400` (invalid transition based on matrix), `403` (forbidden), `404` (not found).
+*   **Request Shape:** 
+    ```json
+    { 
+      "status": "Waiting for Requester", 
+      "itPriority": "High",
+      "reason": "Optional/Required depending on transition",
+      "comment": "Optional/Required depending on transition"
+    }
+    ```
+*   **Transition Payload Rules:**
+    *   **New -> Cancelled:** Requires `reason` field. Atomically creates an `InternalNote` containing the cancellation reason authored by the IT Staff.
+    *   **Open / In Progress -> Waiting for Requester:** Requires `comment` field. Atomically creates a `PublicComment` explaining what is needed from the Requester.
+    *   **In Progress -> Resolved:** Requires `comment` field. Atomically creates a `PublicComment` detailing the resolution.
+    *   **New -> Open:** Does not require `reason` or `comment`, but validates that the ticket is actively assigned (ownerId is not null).
+*   **Success Status:** `200 OK`. Returns the updated ticket.
+*   **Errors:** `400` (missing required condition like reason/comment, invalid transition based on matrix), `403` (forbidden for Admin/Requester), `404` (not found).
 
 ### 3.4 Comments & Notes
 
