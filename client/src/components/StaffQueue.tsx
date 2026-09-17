@@ -295,7 +295,7 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
                 </thead>
                 <tbody style={{ borderTop: 'none' }}>
                   {tickets.map(ticket => (
-                    <tr key={ticket.id} onClick={() => onTicketClick?.(ticket.id)} style={{ cursor: 'pointer' }}>
+                    <tr key={ticket.id} onClick={() => user?.role === 'IT Staff' && onTicketClick?.(ticket.id)} style={{ cursor: user?.role === 'IT Staff' ? 'pointer' : 'default' }}>
                       <td className="fw-medium text-secondary">{ticket.ticketNumber}</td>
                       <td className="fw-bold">{ticket.summary}</td>
                       <td><span className="badge bg-light text-dark border fw-normal">{ticket.category.name}</span></td>
@@ -317,7 +317,7 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
             {/* Mobile Card View */}
             <div className="d-md-none">
               {tickets.map(ticket => (
-                <div key={ticket.id} className="card mb-3 shadow-sm" onClick={() => onTicketClick?.(ticket.id)} style={{ cursor: 'pointer' }}>
+                <div key={ticket.id} className="card mb-3 shadow-sm" onClick={() => user?.role === 'IT Staff' && onTicketClick?.(ticket.id)} style={{ cursor: user?.role === 'IT Staff' ? 'pointer' : 'default' }}>
                   <div className="card-body">
                     <div className="d-flex justify-content-between align-items-center mb-2">
                       <span className="fw-medium text-secondary small">{ticket.ticketNumber}</span>

@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+﻿import express, { Request, Response } from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import cookieParser from "cookie-parser";
@@ -33,7 +33,7 @@ app.get("/", (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// Issue 2 — API health check
+// Issue 2 โ€” API health check
 // Make the test in tests/lab-01/health.test.ts pass.
 // It must return HTTP 200 with JSON: { status: "ok", service: "TokTickIT API" }
 // ---------------------------------------------------------------------------
@@ -264,6 +264,181 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
 });
 
 
+
+// PATCH /api/staff/tickets/:id/assign
+app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'IT Staff') {
+      return res.status(403).json({ error: "Forbidden: Only IT Staff can assign tickets" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: "Invalid ticket ID" });
+    }
+
+    const { ownerId } = req.body;
+    if (ownerId !== null && ownerId !== undefined && typeof ownerId !== 'number') {
+      return res.status(400).json({ error: "Invalid ownerId format" });
+    }
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    if (ownerId) {
+      const targetUser = await getPrisma().user.findUnique({ where: { id: ownerId } });
+      if (!targetUser || targetUser.role !== 'IT Staff' || !targetUser.isActive) {
+        return res.status(400).json({ error: "Target owner must be an active IT Staff user" });
+      }
+    }
+
+    const updatedTicket = await getPrisma().ticket.update({
+      where: { id: ticketId },
+      data: { ownerId: ownerId === undefined ? ticket.ownerId : ownerId }
+    });
+
+    return res.status(200).json(updatedTicket);
+  } catch (err) {
+    console.error("Error assigning ticket:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /api/staff/tickets/:id/status
+app.patch("/api/staff/tickets/:id/status", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'IT Staff') {
+      return res.status(403).json({ error: "Forbidden: Only IT Staff can update ticket status" });
+    }
+
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: "Invalid ticket ID" });
+    }
+
+    const { status, itPriority, comment, reason } = req.body;
+
+    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
+    if (itPriority && !validPriorities.includes(itPriority)) {
+      return res.status(400).json({ error: "Invalid IT Priority" });
+    }
+
+    const transitions: Record<string, string[]> = {
+      'New': ['Open', 'Cancelled'],
+      'Open': ['In Progress', 'Waiting for Requester'],
+      'Waiting for Requester': ['Open', 'In Progress'],
+      'In Progress': ['Resolved', 'Waiting for Requester'],
+      'Resolved': ['Closed'],
+      'Closed': ['Reopened'],
+      'Cancelled': []
+    };
+
+    if (status && status !== ticket.status) {
+      const allowed = transitions[ticket.status] || [];
+      if (!allowed.includes(status)) {
+        return res.status(400).json({ error: `Invalid transition from ${ticket.status} to ${status}` });
+      }
+
+      // Check required conditions
+      if (status === 'In Progress' && ticket.status === 'Open') {
+        if (!ticket.ownerId) {
+          return res.status(400).json({ error: "Ticket must be assigned before moving to In Progress" });
+        }
+      }
+
+      if (status === 'Open' && ticket.status === 'New') {
+        if (!ticket.ownerId) {
+          return res.status(400).json({ error: "Ticket must be claimed/assigned before opening" });
+        }
+      }
+
+      if (status === 'Cancelled' && ticket.status === 'New') {
+        if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+          return res.status(400).json({ error: "Cancellation reason is required" });
+        }
+      }
+
+      if (status === 'Waiting for Requester' && ['Open', 'In Progress'].includes(ticket.status)) {
+        if (!comment || typeof comment !== 'string' || comment.trim() === '') {
+          return res.status(400).json({ error: "Public comment is required" });
+        }
+      }
+
+      if (status === 'Resolved' && ticket.status === 'In Progress') {
+        if (!comment || typeof comment !== 'string' || comment.trim() === '') {
+          return res.status(400).json({ error: "Resolution comment is required" });
+        }
+      }
+    }
+
+    // Prepare transaction
+    const transactionOps = [];
+    const updateData: any = {};
+    if (status) updateData.status = status;
+    if (itPriority) updateData.itPriority = itPriority;
+
+    if (Object.keys(updateData).length > 0) {
+      transactionOps.push(getPrisma().ticket.update({
+        where: { id: ticketId },
+        data: updateData
+      }));
+    }
+
+    if (status === 'Cancelled' && ticket.status === 'New' && reason) {
+      transactionOps.push(getPrisma().internalNote.create({
+        data: {
+          content: `Cancellation Reason: ${reason}`,
+          ticketId: ticketId,
+          authorId: user.id
+        }
+      }));
+    }
+
+    if (status === 'Waiting for Requester' && ['Open', 'In Progress'].includes(ticket.status) && comment) {
+      transactionOps.push(getPrisma().publicComment.create({
+        data: {
+          content: comment,
+          ticketId: ticketId,
+          authorId: user.id
+        }
+      }));
+    }
+
+    if (status === 'Resolved' && ticket.status === 'In Progress' && comment) {
+      transactionOps.push(getPrisma().publicComment.create({
+        data: {
+          content: comment,
+          ticketId: ticketId,
+          authorId: user.id
+        }
+      }));
+    }
+
+    let updatedTicket = ticket;
+    if (transactionOps.length > 0) {
+      const results = await getPrisma().$transaction(transactionOps);
+      // The first operation is the ticket update
+      if (Object.keys(updateData).length > 0) {
+        updatedTicket = results[0];
+      }
+    }
+
+    return res.status(200).json(updatedTicket);
+  } catch (err) {
+    console.error("Error updating ticket status:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 app.get("/api/staff/users", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
@@ -387,3 +562,4 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
 });
 
 export default app;
+
