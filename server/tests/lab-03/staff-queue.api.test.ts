@@ -218,6 +218,16 @@ describe('GET /api/staff/users', () => {
     expect(res.body.data.some((u: any) => u.name === 'Active Staff 2')).toBe(true);
     expect(res.body.data.some((u: any) => u.name === 'Inactive Staff')).toBe(false);
 
+    // Exact shape assertion: no sensitive fields
+    res.body.data.forEach((user: any) => {
+      const keys = Object.keys(user).sort();
+      expect(keys).toEqual(['id', 'name']);
+      expect(user.email).toBeUndefined();
+      expect(user.passwordHash).toBeUndefined();
+      expect(user.role).toBeUndefined();
+      expect(user.sessionId).toBeUndefined();
+    });
+
     // Administrator
     res = await request(app).get('/api/staff/users').set('Cookie', `sessionId=${adminCookie}`);
     expect(res.status).toBe(200);
