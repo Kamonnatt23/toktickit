@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import App from '../../src/App';
 
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+vi.stubGlobal('fetch', mockFetch);
 
 describe('App Shell & Role Navigation', () => {
   let meResponse: any = { ok: true, status: 200, json: async () => ({ id: 1, role: 'Requester', name: 'Requester John', requiresPasswordChange: false }) };

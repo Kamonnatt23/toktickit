@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../api';
 
 interface User {
   id: number;
@@ -9,6 +8,8 @@ interface User {
   role: string;
   isActive: boolean;
 }
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 const UserManagement: React.FC = () => {
   const { user } = useAuth();
@@ -29,7 +30,7 @@ const UserManagement: React.FC = () => {
       if (search) query.append('search', search);
       if (roleFilter !== 'All') query.append('role', roleFilter);
       
-      const res = await api.get(`/admin/users?${query.toString()}`);
+      const res = await fetch(`${API_URL}/api/admin/users?${query.toString()}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.data);
@@ -78,7 +79,7 @@ const UserManagement: React.FC = () => {
 
     try {
       if (isResetPassword) {
-        const res = await api.post(`/admin/users/${formData.id}/reset-password`, { newPassword: formData.newPassword });
+        const res = await fetch(`${API_URL}/api/admin/users/${formData.id}/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newPassword: formData.newPassword }), credentials: 'include' });
         if (res.ok) {
           setIsModalOpen(false);
         } else {
@@ -87,12 +88,7 @@ const UserManagement: React.FC = () => {
         }
       } else if (formData.id) {
         // Edit
-        const res = await api.patch(`/admin/users/${formData.id}`, {
-          name: formData.name,
-          email: formData.email,
-          role: formData.role,
-          isActive: formData.isActive
-        });
+        const res = await fetch(`${API_URL}/api/admin/users/${formData.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: formData.name, email: formData.email, role: formData.role, isActive: formData.isActive }), credentials: 'include' });
         if (res.ok) {
           setIsModalOpen(false);
           fetchUsers();
@@ -102,13 +98,7 @@ const UserManagement: React.FC = () => {
         }
       } else {
         // Create
-        const res = await api.post('/admin/users', {
-          name: formData.name,
-          email: formData.email,
-          role: formData.role,
-          initialPassword: formData.initialPassword,
-          isActive: formData.isActive
-        });
+        const res = await fetch(`${API_URL}/api/admin/users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: formData.name, email: formData.email, role: formData.role, initialPassword: formData.initialPassword, isActive: formData.isActive }), credentials: 'include' });
         if (res.ok) {
           setIsModalOpen(false);
           fetchUsers();

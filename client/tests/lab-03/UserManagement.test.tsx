@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import UserManagement from '../../src/components/UserManagement';
 import * as AuthContextModule from '../../src/contexts/AuthContext';
-import { api } from '../../src/api';
 
 vi.mock('../../src/api', () => ({
   api: {
@@ -12,6 +11,9 @@ vi.mock('../../src/api', () => ({
     patch: vi.fn(),
   }
 }));
+
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
 
 const mockUser = {
   id: 3,
@@ -24,9 +26,10 @@ const mockUser = {
 const renderWithContext = (role = 'Administrator') => {
   vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
     user: { ...mockUser, role } as any,
-    login: vi.fn(),
-    logout: vi.fn(),
-    loading: false
+    setUser: vi.fn(),
+      refreshUser: vi.fn(),
+      logout: vi.fn(),
+      isLoading: false
   });
   return render(<UserManagement />);
 };
@@ -42,7 +45,7 @@ describe('UserManagement Component', () => {
   });
 
   it('renders user list for Administrators', async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({
+    vi.mocked(mockFetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         data: [
@@ -61,7 +64,7 @@ describe('UserManagement Component', () => {
   });
 
   it('handles duplicate email 409 conflict gracefully during creation', async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({
+    vi.mocked(mockFetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ data: [] })
     } as any);
@@ -79,7 +82,7 @@ describe('UserManagement Component', () => {
     fireEvent.change(screen.getByLabelText(/Initial Password/i), { target: { value: '123' } });
     
     // Submit
-    vi.mocked(api.post).mockResolvedValueOnce({
+    vi.mocked(mockFetch).mockResolvedValueOnce({
       ok: false,
       status: 409,
       json: async () => ({ error: 'Email already exists' })
