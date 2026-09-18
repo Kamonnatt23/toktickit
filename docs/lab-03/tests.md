@@ -45,7 +45,7 @@ This document outlines the test strategy and planned test cases for Lab 3, cover
 | **E2E-01**  | E2E | AC-01, AC-04, AC-05 | Full Authentication lifecycle | Logs in, navigates role-specific UI, blocks URL hopping (404), logs out | `client/tests/e2e/lab-03/authentication.spec.ts` | Pass |
 | **E2E-02**  | E2E | AC-07, AC-08, AC-09 | Staff workflow end-to-end | Staff logs in, searches queue, claims ticket, updates status, adds note | `client/tests/e2e/lab-03/staff-ticket-flow.spec.ts` | Pass |
 | **E2E-03**  | E2E | AC-13, AC-15 | User Administration | Admin logs in, creates Staff user, safely fails self-deactivation | `client/tests/e2e/lab-03/user-administration.spec.ts` | Pass |
-| **VIS-01**  | Visual | AC-17 | Responsive layout | Verify layout on Desktop and Mobile viewports and ensure core elements remain visible and usable. | UI adapts across tested viewports; elements remain visible and screenshots are successfully captured. | `client/tests/e2e/lab-03/responsive.spec.ts` | Pass |
+| **VIS-01**  | Visual | AC-17 | Responsive layout | Verify layout on Desktop, Tablet, and Mobile viewports and ensure core elements remain visible and usable. | UI adapts across tested viewports; elements remain visible and screenshots are successfully captured. | `client/tests/e2e/lab-03/responsive.spec.ts` | Pass |
 
 ## 3. Test Coverage Goals
 *   **Security/Authorization:** High priority. Explicit authorization and security testing is required for Attachment endpoints, Administrator endpoints, Ticket ownership (non-enumeration 404), Internal Notes boundaries, role-based access controls, and unauthenticated/invalid session access. The planned tests focus explicitly on these critical boundaries.
