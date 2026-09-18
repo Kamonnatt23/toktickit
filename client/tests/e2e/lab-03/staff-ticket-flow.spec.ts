@@ -34,8 +34,14 @@ test.describe('Staff Ticket Flow', () => {
       import { PrismaClient } from '@prisma/client';
       const prisma = new PrismaClient();
       async function clean() {
-        await prisma.ticket.deleteMany({ where: { summary: '${ticketSummary}' } });
-        await prisma.session.deleteMany({ where: { userId: { not: 0 } } });
+        const t = await prisma.ticket.findFirst({ where: { summary: '${ticketSummary}' } });
+        if (t) {
+          await prisma.publicComment.deleteMany({ where: { ticketId: t.id } });
+          await prisma.internalNote.deleteMany({ where: { ticketId: t.id } });
+          await prisma.ticket.deleteMany({ where: { id: t.id } });
+        }
+        const users = await prisma.user.findMany({ where: { email: { in: ['${staffEmail}', '${reqEmail}'] } } });
+        await prisma.session.deleteMany({ where: { userId: { in: users.map(u => u.id) } } });
         await prisma.user.deleteMany({
           where: { email: { in: ['${staffEmail}', '${reqEmail}'] } }
         });

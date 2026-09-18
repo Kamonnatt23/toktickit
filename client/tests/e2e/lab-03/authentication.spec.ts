@@ -5,10 +5,17 @@ function restoreUser(email) {
   const script = `
     import { PrismaClient } from '@prisma/client';
     const prisma = new PrismaClient();
-    prisma.user.update({
-      where: { email: '${email}' },
-      data: { requiresPasswordChange: true, passwordHash: '\$2b\$10\$T.vM0h0mC3n.y6QpX009r.D1PjP0rG6s.t4Gj4g1z.w.E7G0r6qGy' }
-    }).then(() => prisma.$disconnect());
+    async function restore() {
+      const u = await prisma.user.findFirst({ where: { email: '${email}' } });
+      if (u) {
+        await prisma.session.deleteMany({ where: { userId: u.id } });
+        await prisma.user.update({
+          where: { id: u.id },
+          data: { requiresPasswordChange: true, passwordHash: '\$2b\$10\$T.vM0h0mC3n.y6QpX009r.D1PjP0rG6s.t4Gj4g1z.w.E7G0r6qGy' }
+        });
+      }
+    }
+    restore().finally(() => prisma.$disconnect());
   `;
   execSync(`node --input-type=module -e "${script.replace(/\n/g, '')}"`, { cwd: '../server' });
 }
@@ -22,7 +29,7 @@ test.describe('Authentication Lifecycle', () => {
     await expect(page.locator('text="Sign in to IT Service Desk"')).toBeVisible();
 
     // API access blocked test
-    const unauthRes = await request.get('/api/tickets');
+    const unauthRes = await request.get('http://127.0.0.1:3000/api/tickets');
     expect(unauthRes.status()).toBe(401);
 
     await page.goto('/');
@@ -65,7 +72,7 @@ test.describe('Authentication Lifecycle', () => {
     // 5. URL hopping for authenticated Requester to a Staff route (should be 403 or 404, we expect 403 or 404 as per actual backend behavior, so we just expect it not to be 200)
     // Actually, Playwright page.request does NOT share cookies automatically unless we use the same context or manually pass cookies, so we can just use page.evaluate to fetch it within the browser context.
     const resStatus = await page.evaluate(async () => {
-      const res = await fetch('/api/staff/tickets');
+      const res = await fetch('http://127.0.0.1:3000/api/staff/tickets');
       return res.status;
     });
     // The backend uses 403 for Staff/Admin boundaries usually, or 404.
@@ -78,7 +85,7 @@ test.describe('Authentication Lifecycle', () => {
 
     // 7. Verify post-logout protected access is blocked
     const postLogoutStatus = await page.evaluate(async () => {
-      const res = await fetch('/api/tickets');
+      const res = await fetch('http://127.0.0.1:3000/api/tickets');
       return res.status;
     });
     expect(postLogoutStatus).toBe(401);

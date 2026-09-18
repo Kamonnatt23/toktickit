@@ -1,3 +1,4 @@
+import * as bcrypt from 'bcrypt';
 ﻿import express, { Request, Response } from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
@@ -46,7 +47,7 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
       select: { id: true, name: true },
       orderBy: { id: "asc" },
     });
-    
+
     res.status(200).json(categories);
   } catch (err) {
     console.error("Error fetching categories:", err);
@@ -61,7 +62,7 @@ app.get("/api/dev/users", async (_req: Request, res: Response) => {
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
     });
-    
+
     res.status(200).json(users);
   } catch (err) {
     console.error("Error fetching dev users:", err);
@@ -91,22 +92,22 @@ app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promi
     const requesterId = user.id;
 
     const { categoryId, relatedSystemId, summary, priority, description, attachmentIds } = req.body;
-    
+
     const trimmedSummary = String(summary || '').trim();
     const trimmedDescription = String(description || '').trim();
-    
+
     if (!categoryId || !relatedSystemId || !trimmedSummary || !priority || !trimmedDescription) {
       return res.status(400).json({ error: "Missing required fields" });
     }
-    
+
     if (trimmedSummary.length > 100) {
       return res.status(400).json({ error: "Summary exceeds maximum length of 100 characters" });
     }
-    
+
     if (trimmedDescription.length > 1000) {
       return res.status(400).json({ error: "Description exceeds maximum length of 1000 characters" });
     }
-    
+
     const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
     if (!validPriorities.includes(priority)) {
       return res.status(400).json({ error: "Invalid priority" });
@@ -114,7 +115,7 @@ app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promi
 
     const categoryExists = await getPrisma().category.findUnique({ where: { id: parseInt(categoryId, 10) } });
     const systemExists = await getPrisma().relatedSystem.findUnique({ where: { id: parseInt(relatedSystemId, 10) } });
-    
+
     if (!categoryExists || !systemExists) {
       return res.status(400).json({ error: "Invalid category or related system" });
     }
@@ -125,17 +126,17 @@ app.post("/api/tickets", requireAuth, async (req: Request, res: Response): Promi
       if (parsedAttachmentIds.length > 5) {
         return res.status(400).json({ error: "Cannot link more than 5 attachments" });
       }
-      
+
       // Verify attachments exist and are not already linked or deleted
       if (parsedAttachmentIds.length > 0) {
         const existingAttachments = await getPrisma().attachment.findMany({
           where: { id: { in: parsedAttachmentIds }, isDeleted: false }
         });
-        
+
         if (existingAttachments.length !== parsedAttachmentIds.length) {
           return res.status(400).json({ error: "One or more attachments are invalid, deleted, or do not exist" });
         }
-        
+
         for (const att of existingAttachments) {
           if (att.ticketId !== null) {
             return res.status(400).json({ error: "One or more attachments are already linked to a ticket" });
@@ -184,11 +185,11 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
 
     let pageNum = parseInt(page as string, 10);
     if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
-    
+
     let limitNum = parseInt(limit as string, 10);
     if (isNaN(limitNum) || limitNum < 1) limitNum = 10;
     if (limitNum > 50) limitNum = 50;
-    
+
     const skip = (pageNum - 1) * limitNum;
 
     const whereClause: any = {};
@@ -214,7 +215,7 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
     if (search && typeof search === 'string') {
       const searchStr = search.trim();
       const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
-      
+
       if (searchIdMatch) {
          whereClause.id = parseInt(searchIdMatch[1], 10);
       } else {
@@ -229,8 +230,8 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
     const [tickets, total] = await Promise.all([
       getPrisma().ticket.findMany({
         where: whereClause,
-        include: { 
-          category: true, 
+        include: {
+          category: true,
           relatedSystem: true,
           requester: { select: { id: true, name: true, email: true } },
           owner: { select: { id: true, name: true, email: true } }
@@ -484,7 +485,7 @@ app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promis
     if (search) {
       const searchStr = String(search).trim();
       const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i);
-      
+
       if (searchIdMatch) {
          whereClause.id = parseInt(searchIdMatch[1], 10);
       } else {
@@ -531,7 +532,7 @@ app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promis
 app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
-    
+
     const ticketId = parseInt(req.params.id, 10);
     if (isNaN(ticketId)) {
       return res.status(400).json({ error: "Invalid ticket ID format" });
@@ -539,8 +540,8 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
 
     const ticket = await getPrisma().ticket.findUnique({
       where: { id: ticketId },
-      include: { 
-        category: true, 
+      include: {
+        category: true,
         relatedSystem: true,
         attachments: true
       }
@@ -824,7 +825,7 @@ app.post("/api/admin/users", requireAuth, requireAdmin, async (req: Request, res
       return res.status(409).json({ error: "Email already exists" });
     }
 
-    const bcrypt = require('bcrypt');
+
     const passwordHash = await bcrypt.hash(initialPassword, 10);
 
     const newUser = await getPrisma().user.create({
@@ -930,7 +931,7 @@ app.post("/api/admin/users/:id/reset-password", requireAuth, requireAdmin, async
     const user = await getPrisma().user.findUnique({ where: { id } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const bcrypt = require('bcrypt');
+
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     await getPrisma().user.update({
