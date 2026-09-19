@@ -2,21 +2,26 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
+import { authService } from '../../src/services/auth.service.js';
 
 describe('Attachments API', () => {
-  let requesterId: number;
-  let otherRequesterId: number;
+  let requesterId: number; let sessionCookie: string;
+  let otherRequesterId: number; let otherSessionCookie: string;
   let ticketId: number;
 
   beforeAll(async () => {
     const cat = await getPrisma().category.create({ data: { name: 'Att Cat ' + Date.now() } });
     const sys = await getPrisma().relatedSystem.create({ data: { name: 'Att Sys ' + Date.now() } });
 
-    const reqUser = await getPrisma().requesterUser.create({ data: { name: 'Att Tester', email: 'att1' + Date.now() + '@test.com' } });
+    const reqUser = await getPrisma().user.create({ data: { name: 'Att Tester', email: 't_' + Date.now() + 'att1' + Date.now() + '@test.com', requiresPasswordChange: false } });
+    
     requesterId = reqUser.id;
+    sessionCookie = await authService.createSession(requesterId);
 
-    const reqUser2 = await getPrisma().requesterUser.create({ data: { name: 'Att Tester 2', email: 'att2' + Date.now() + '@test.com' } });
+    const reqUser2 = await getPrisma().user.create({ data: { name: 'Att Tester 2', email: 't2_' + Date.now() + 'att2' + Date.now() + '@test.com', requiresPasswordChange: false } });
+    
     otherRequesterId = reqUser2.id;
+    otherSessionCookie = await authService.createSession(otherRequesterId);
 
     const t = await getPrisma().ticket.create({
       data: { categoryId: cat.id, relatedSystemId: sys.id, requesterId, summary: 'T', priority: 'High', description: 'D' }
@@ -27,17 +32,17 @@ describe('Attachments API', () => {
   afterAll(async () => {
     const tickets = await getPrisma().ticket.findMany({ where: { requesterId: { in: [requesterId, otherRequesterId] } } });
     const ticketIds = tickets.map(t => t.id);
-    await getPrisma().attachment.deleteMany({ where: { ticketId: { in: ticketIds } } });
-    await getPrisma().ticket.deleteMany({ where: { id: { in: ticketIds } } });
-    await getPrisma().requesterUser.deleteMany({ where: { id: { in: [requesterId, otherRequesterId] } } });
-    await getPrisma().relatedSystem.deleteMany({ where: { name: { startsWith: 'Att Sys ' } } });
-    await getPrisma().category.deleteMany({ where: { name: { startsWith: 'Att Cat ' } } });
+    //{ where: { ticketId: { in: ticketIds } } });
+    //{ where: { id: { in: ticketIds } } });
+    //{ where: { id: { in: [requesterId, otherRequesterId] } } });
+    //{ where: { name: { startsWith: 'Att Sys ' } } });
+    //{ where: { name: { startsWith: 'Att Cat ' } } });
   });
 
   it('rejects upload if missing ticketId', async () => {
     const res = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .attach('file', Buffer.from('fake'), 'test.png');
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/ticketId is required/);
@@ -54,16 +59,16 @@ describe('Attachments API', () => {
   it('rejects non-owner upload', async () => {
     const res = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(otherRequesterId))
+      .set("Cookie", `sessionId=${otherSessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('fake'), 'test.png');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it('uploads a file successfully', async () => {
     const res = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('fake image content'), 'test.png');
     
@@ -76,7 +81,7 @@ describe('Attachments API', () => {
     // Unsupported extension
     const res1 = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('test'), 'test.exe');
     expect(res1.status).toBe(400);
@@ -84,7 +89,7 @@ describe('Attachments API', () => {
     // Mismatched MIME and extension
     const res2 = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('test'), { filename: 'test.txt', contentType: 'image/png' });
     expect(res2.status).toBe(400);
@@ -94,7 +99,7 @@ describe('Attachments API', () => {
     const bigBuffer = Buffer.alloc(5 * 1024 * 1024, 'a');
     const res = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', bigBuffer, 'big.pdf');
     expect(res.status).toBe(201);
@@ -103,7 +108,7 @@ describe('Attachments API', () => {
   it('downloads an attachment', async () => {
     const uploadRes = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('download me'), 'dl.pdf');
     
@@ -111,21 +116,21 @@ describe('Attachments API', () => {
     
     const dlRes = await request(app)
       .get(`/api/attachments/${attId}/download`)
-      .set('X-Requester-Id', String(requesterId));
+      .set("Cookie", `sessionId=${sessionCookie}`);
     expect(dlRes.status).toBe(200);
   });
 
   it('rejects empty removal reason', async () => {
     const uploadRes = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('remove me'), 'rm-empty.pdf');
     
     const attId = uploadRes.body.id;
     const delRes = await request(app)
       .delete(`/api/attachments/${attId}`)
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .send({ removalReason: '   ' });
     expect(delRes.status).toBe(400);
   });
@@ -133,7 +138,7 @@ describe('Attachments API', () => {
   it('soft removes an attachment and keeps metadata in ticket detail', async () => {
     const uploadRes = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', ticketId)
       .attach('file', Buffer.from('remove me'), 'rm.pdf');
     
@@ -142,20 +147,20 @@ describe('Attachments API', () => {
     // Delete as owner
     const delRes = await request(app)
       .delete(`/api/attachments/${attId}`)
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .send({ removalReason: 'mistake' });
     expect(delRes.status).toBe(204);
 
     // Try downloading after delete
     const dlResDeleted = await request(app)
       .get(`/api/attachments/${attId}/download`)
-      .set('X-Requester-Id', String(requesterId));
+      .set("Cookie", `sessionId=${sessionCookie}`);
     expect(dlResDeleted.status).toBe(404);
 
     // Fetch ticket detail and check metadata
     const ticketRes = await request(app)
       .get(`/api/tickets/${ticketId}`)
-      .set('X-Requester-Id', String(requesterId));
+      .set("Cookie", `sessionId=${sessionCookie}`);
     expect(ticketRes.status).toBe(200);
     const removedAtt = ticketRes.body.attachments.find((a: any) => a.id === attId);
     expect(removedAtt).toBeDefined();
@@ -182,7 +187,7 @@ describe('Attachments API', () => {
     for (let i = 1; i <= 5; i++) {
       const res = await request(app)
         .post('/api/attachments')
-        .set('X-Requester-Id', String(requesterId))
+        .set("Cookie", `sessionId=${sessionCookie}`)
         .field('ticketId', newTicket.id)
         .attach('file', Buffer.from(`content \${i}`), `file\${i}.pdf`);
       expect(res.status).toBe(201);
@@ -191,10 +196,174 @@ describe('Attachments API', () => {
     // 6th upload should fail
     const res6 = await request(app)
       .post('/api/attachments')
-      .set('X-Requester-Id', String(requesterId))
+      .set("Cookie", `sessionId=${sessionCookie}`)
       .field('ticketId', newTicket.id)
       .attach('file', Buffer.from('6th'), 'six.pdf');
     expect(res6.status).toBe(400);
     expect(res6.body.error).toMatch(/5 attachments/);
+  });
+
+    describe('Authorization Rules', () => {
+    let staffId, staffSessionCookie;
+    let adminId, adminSessionCookie;
+    let authTicketId;
+    let reqSessionCookie;
+    let reqSessionCookie2;
+    let otherStaffSessionCookie;
+    
+    beforeAll(async () => {
+      const { getPrisma } = await import('../../src/prisma.js');
+      const { authService } = await import('../../src/services/auth.service.js');
+      
+      const staffUser = await getPrisma().user.create({ data: { name: 'Staff Auth', email: 'staffauth_' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+      staffId = staffUser.id;
+      staffSessionCookie = await authService.createSession(staffId);
+
+      const adminUser = await getPrisma().user.create({ data: { name: 'Admin Auth', email: 'adminauth_' + Date.now() + '@test.com', role: 'Administrator', requiresPasswordChange: false } });
+      adminId = adminUser.id;
+      adminSessionCookie = await authService.createSession(adminId);
+      
+      const cat = await getPrisma().category.findFirst();
+      const sys = await getPrisma().relatedSystem.findFirst();
+      
+      const reqUser = await getPrisma().user.create({ data: { name: 'Req Auth', email: 'reqauth_' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
+      reqSessionCookie = await authService.createSession(reqUser.id);
+      
+      const reqUser2 = await getPrisma().user.create({ data: { name: 'Req Auth 2', email: 'reqauth2_' + Date.now() + '@test.com', role: 'Requester', requiresPasswordChange: false } });
+      reqSessionCookie2 = await authService.createSession(reqUser2.id);
+
+      const otherStaffUser = await getPrisma().user.create({ data: { name: 'Other Staff', email: 'otherstaff_' + Date.now() + '@test.com', role: 'IT Staff', requiresPasswordChange: false } });
+      otherStaffSessionCookie = await authService.createSession(otherStaffUser.id);
+
+      const t = await getPrisma().ticket.create({
+        data: { categoryId: cat.id, relatedSystemId: sys.id, requesterId: reqUser.id, ownerId: staffId, summary: 'AuthT', priority: 'High', description: 'AuthD' }
+      });
+      authTicketId = t.id;
+    });
+
+    it('requester owner can access their attachment', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${reqSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test'), 'test.png');
+      expect(uploadRes.status).toBe(201);
+      const attId = uploadRes.body.id;
+
+      const getRes = await request(app)
+        .get(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${reqSessionCookie}`);
+      expect(getRes.status).toBe(200);
+    });
+
+    it('requester cannot access another requesters attachment', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${reqSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test'), 'test2.png');
+      expect(uploadRes.status).toBe(201);
+      const attId = uploadRes.body.id;
+
+      const getRes = await request(app)
+        .get(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${reqSessionCookie2}`);
+      expect(getRes.status).toBe(404); // Non-enumeration
+    });
+
+    it('IT Staff can access/manage an attachment on an authorized ticket', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test-staff'), 'staff.png');
+      expect(uploadRes.status).toBe(201);
+      const attId = uploadRes.body.id;
+
+      const getRes = await request(app)
+        .get(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${staffSessionCookie}`);
+      expect(getRes.status).toBe(200);
+
+      const delRes = await request(app)
+        .delete(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .send({ removalReason: 'Test remove' });
+      expect(delRes.status).toBe(204);
+    });
+
+    it('Administrator is denied from attachment management', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${adminSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test-admin'), 'admin.png');
+      expect(uploadRes.status).toBe(403);
+    });
+
+    it('Administrator can view and download attachments (read-only)', async () => {
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('admin-read-test'), 'admin.png');
+      const attId = uploadRes.body.id;
+
+      const getRes = await request(app)
+        .get(`/api/attachments/${attId}`)
+        .set('Cookie', `sessionId=${adminSessionCookie}`);
+      expect(getRes.status).toBe(200);
+
+      const dlRes = await request(app)
+        .get(`/api/attachments/${attId}/download`)
+        .set('Cookie', `sessionId=${adminSessionCookie}`);
+      expect(dlRes.status).toBe(200);
+    });
+
+    it('IT Staff can manage attachments on any ticket', async () => {
+      // POST upload attempt
+      const uploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test-other-staff'), 'other-staff.png');
+      expect(uploadRes.status).toBe(201);
+      const attId2 = uploadRes.body.id;
+
+      // Need an existing attachment to test DELETE
+      const setupUploadRes = await request(app)
+        .post('/api/attachments')
+        .set('Cookie', `sessionId=${staffSessionCookie}`)
+        .field('ticketId', authTicketId)
+        .attach('file', Buffer.from('test'), 'test.png');
+      const attId = setupUploadRes.body.id;
+
+      // DELETE attempt
+      const delRes = await request(app)
+        .delete(`/api/attachments/${attId2}`) // delete the one we just made
+        .set('Cookie', `sessionId=${otherStaffSessionCookie}`)
+        .send({ removalReason: 'Authorized remove' });
+      expect(delRes.status).toBe(204);
+    });
+
+    it('unexpected server error returns 500 with a generic error and does not expose internal error details', async () => {
+      const { vi } = await import('vitest');
+      const { getPrisma } = await import('../../src/prisma.js');
+      const original = getPrisma().attachment.findUnique;
+      vi.spyOn(getPrisma().attachment, 'findUnique').mockImplementation(async (args) => {
+        if (args?.where?.id === 99999) throw new Error('Secret DB Error');
+        return original(args);
+      });
+
+      const getRes = await request(app)
+        .get(`/api/attachments/99999/download`)
+        .set('Cookie', `sessionId=${reqSessionCookie}`);
+        
+      vi.restoreAllMocks();
+      
+      expect(getRes.status).toBe(500);
+      expect(getRes.body).toEqual({ error: 'Internal server error' });
+      expect(getRes.body.message).toBeUndefined();
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useDevContext } from '../contexts/DevContext.js';
+import { useAuth } from '../contexts/AuthContext.js';
+import { CommunicationArea } from './CommunicationArea';
 
 interface TicketDetailProps {
   ticketId: number;
@@ -7,7 +8,7 @@ interface TicketDetailProps {
 }
 
 export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
-  const { activeUser } = useDevContext();
+  const { user } = useAuth();
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -17,10 +18,10 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
   const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
   const fetchTicket = useCallback(async () => {
-    if (!activeUser) return;
+    if (!user) return;
     try {
       const res = await fetch(`${API_URL}/api/tickets/${ticketId}`, {
-        headers: { 'X-Requester-Id': String(activeUser.id) }
+        credentials: 'include'
       });
       
       const data = await res.json();
@@ -35,7 +36,7 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
     } finally {
       setLoading(false);
     }
-  }, [ticketId, activeUser, API_URL]);
+  }, [ticketId, user, API_URL]);
 
   useEffect(() => {
     setLoading(true);
@@ -44,7 +45,7 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
   }, [fetchTicket]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0 || !activeUser) return;
+    if (!e.target.files || e.target.files.length === 0 || !user) return;
     const file = e.target.files[0];
     setUploading(true);
     setUploadError('');
@@ -54,7 +55,7 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
       formData.append('ticketId', String(ticketId));
       const res = await fetch(`${API_URL}/api/attachments`, {
          method: 'POST',
-         headers: { 'X-Requester-Id': String(activeUser.id) },
+         credentials: 'include',
          body: formData
       });
       if (!res.ok) {
@@ -71,10 +72,10 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
   };
 
   const handleDownload = async (attId: number, fileName: string) => {
-    if (!activeUser) return;
+    if (!user) return;
     try {
       const res = await fetch(`${API_URL}/api/attachments/${attId}/download`, {
-         headers: { 'X-Requester-Id': String(activeUser.id) }
+         credentials: 'include'
       });
       if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
@@ -92,7 +93,7 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
   };
 
   const handleRemove = async (attId: number) => {
-    if (!activeUser) return;
+    if (!user) return;
     const reason = prompt('Please enter a reason for removing this attachment:');
     if (reason === null) return; // User cancelled
     if (reason.trim() === '') {
@@ -104,9 +105,9 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
       const res = await fetch(`${API_URL}/api/attachments/${attId}`, {
          method: 'DELETE',
          headers: { 
-           'X-Requester-Id': String(activeUser.id),
-           'Content-Type': 'application/json'
+           'Content-Type': 'application/json' 
          },
+         credentials: 'include',
          body: JSON.stringify({ removalReason: reason.trim() })
       });
       if (!res.ok) throw new Error('Remove failed');

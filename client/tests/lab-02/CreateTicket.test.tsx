@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CreateTicket } from '../../src/components/CreateTicket.js';
-import { DevProvider } from '../../src/contexts/DevContext.js';
+import { AuthProvider } from '../../src/contexts/AuthContext.js';
 
 // Mock contexts and fetch
 const mockCategories = [{ id: 1, name: 'Hardware' }];
@@ -12,7 +12,7 @@ describe('CreateTicket Form', () => {
   beforeEach(() => {
     localStorage.setItem('dev_requester_user', JSON.stringify(mockUser));
     global.fetch = vi.fn((url: string) => {
-      if (url.includes('/api/dev/users')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
       }
       if (url.includes('/api/categories')) {
@@ -30,9 +30,9 @@ describe('CreateTicket Form', () => {
 
   it('renders form fields correctly', async () => {
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -48,9 +48,9 @@ describe('CreateTicket Form', () => {
 
   it('shows validation errors when submitting empty form', async () => {
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -70,9 +70,9 @@ describe('CreateTicket Form', () => {
 
   it('successfully submits the form and shows Ticket Number', async () => {
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -94,9 +94,9 @@ describe('CreateTicket Form', () => {
 
   it('successfully submits the form with exact boundary lengths', async () => {
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -118,9 +118,9 @@ describe('CreateTicket Form', () => {
 
   it('shows validation errors when exceeding max length', async () => {
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -144,9 +144,9 @@ describe('CreateTicket Form', () => {
   it('shows error when dropdowns fail to load', async () => {
     global.fetch = vi.fn(() => Promise.reject(new Error('Network Error'))) as any;
     render(
-      <DevProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
