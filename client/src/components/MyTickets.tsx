@@ -159,7 +159,7 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
                   key={ticket.id} 
                   className="card border-0 shadow-sm" 
                   style={{ borderRadius: '15px', backgroundColor: '#ffffff', cursor: 'pointer', transition: 'transform 0.2s ease, box-shadow 0.2s ease' }}
-                  onClick={() => onTicketClick(ticket.id)}
+                  onClick={() => onTicketClick?.(ticket.id)}
                   onMouseOver={(e) => {
                     e.currentTarget.style.transform = 'translateY(-2px)';
                     e.currentTarget.style.boxShadow = '0 .5rem 1rem rgba(0,0,0,.15)';
