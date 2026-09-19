@@ -1,17 +1,19 @@
 # TokTickIT
 
-TokTickIT is a Requester-facing IT ticketing MVP designed for users to report and track issues. 
+TokTickIT is an IT ticketing system designed for issue reporting, tracking, and resolution, supporting Requester, IT Staff, and Administrator roles.
 
 ## Tech Stack
 - **Frontend:** React, TypeScript, Vite, Bootstrap
 - **Backend:** Node.js, Express, TypeScript, Prisma, PostgreSQL
 
 ## Features
-- **Development Requester Selector:** Simulates a user session context for testing purposes (NOT a real authentication system).
-- **Create Ticket:** Allows requesters to submit new IT issues with required fields (Category, Related System, Summary, Priority, Description).
-- **My Tickets:** A dashboard listing the user's tickets with support for search, filtering, sorting, and pagination.
-- **Ticket Detail:** A read-only view of submitted ticket information with strict ownership enforcement.
-- **Attachment Management:** Supports uploading, downloading, and soft-removing attachments (with required removal reasons), enforcing file type and size limits.
+- **Authentication & RBAC:** Real authentication with session management, role-based access control (RBAC), and mandatory password change on first login.
+- **Requester Workflow:** Ticket creation, tracking via My Tickets dashboard, ticket detail view, and marking problems as resolved.
+- **IT Staff Operations:** Dedicated staff queue with filtering and sorting, ticket claiming/reassignment, IT Priority management, and status transitions.
+- **Communication:** Unified timeline supporting Public Comments (Requester & Staff) and Internal Notes (Staff & Admin only).
+- **Administrator User Management:** Centralized user administration including user activation/deactivation, and password reset/initial password management.
+- **Attachment Management:** Uploading, downloading, and soft-removing attachments with strict ownership and role enforcement.
+- **Responsive UI:** Fully responsive interface optimized for Desktop, Tablet, and Mobile viewports.
 
 ## Quick Setup
 Ensure you have Node.js and npm installed.
@@ -70,6 +72,7 @@ npm run test
 ```
 
 **Frontend (Playwright E2E tests):**
+Includes Lab 3 E2E coverage for authentication, IT Staff workflow, Administrator User Management, and responsive verification.
 ```bash
 cd client
 npx playwright test
