@@ -64,24 +64,36 @@ test.describe('Staff Ticket Flow', () => {
 
     // Test real queue SEARCH
     await page.fill('input[placeholder="Search ID or summary..."]', ticketSummary);
+    const searchResponsePromise = page.waitForResponse(r => r.url().includes('/api/staff/tickets') && r.status() === 200);
     await page.press('input[placeholder="Search ID or summary..."]', 'Enter');
+    await searchResponsePromise;
+    await expect(page.locator('.spinner-border')).toHaveCount(0);
+    await page.waitForTimeout(1000);
 
     // Click the found ticket securely
-    const ticketRow = page.locator(`text="${ticketSummary}" >> visible=true`).first();
+    const ticketRow = page.locator('tr').filter({ hasText: ticketSummary }).first();
     await expect(ticketRow).toBeVisible();
-    await ticketRow.click();
+    await ticketRow.click({ force: true });
+    await page.waitForTimeout(1000);
 
     // Verify correct UI text for ticket detail
     await expect(page.locator('label:has-text("Assignment")')).toBeVisible();
 
     // Test real CLAIM
+    const claimResponsePromise = page.waitForResponse(r => r.url().includes('/api/tickets/') && r.status() === 200);
     await page.click('button:has-text("Claim Ticket")');
+    await claimResponsePromise;
     // Ensure the assignment changed by waiting for the dropdown to show "Staff Test (Me)"
-    await expect(page.locator('select:has(option[value="Unassigned"])')).toContainText('Staff Test (Me)');
+    await expect(page.locator('select:has-text("Unassigned")')).toContainText('Staff Test (Me)');
 
     // Update priorities and status
-    await page.selectOption('select:has(option[value="Critical"])', 'High');
-    await page.selectOption('select:has(option[value="In Progress"])', 'In Progress');
+    const priorityResponsePromise = page.waitForResponse(r => r.url().includes('/api/tickets/') && r.status() === 200);
+    await page.locator('text="IT Priority"').locator('xpath=..').locator('select').selectOption('High');
+    await priorityResponsePromise;
+
+    await page.locator('text="Update Status"').locator('xpath=..').locator('select').selectOption('In Progress');
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: 'debug-before-confirm.png' });
     await page.click('button:has-text("Confirm Status Change")');
 
     // Internal Note

@@ -10,8 +10,12 @@ test.describe('User Administration', () => {
     const setupScript = `
       import { PrismaClient } from '@prisma/client';
       import * as bcrypt from 'bcrypt';
+      import fs from 'fs';
       const prisma = new PrismaClient();
       async function setup() {
+        const admins = await prisma.user.findMany({ where: { role: 'Administrator' } });
+        fs.writeFileSync('admin_states_${runId}.json', JSON.stringify(admins.map(a => ({ id: a.id, isActive: a.isActive }))));
+        await prisma.user.updateMany({ where: { role: 'Administrator', isActive: true }, data: { isActive: false } });
         await prisma.user.create({ data: { name: 'Admin Test', email: '${adminEmail}', passwordHash: await bcrypt.hash('password123', 10), role: 'Administrator', requiresPasswordChange: false } });
       }
       setup().finally(() => prisma.$disconnect());
@@ -22,6 +26,7 @@ test.describe('User Administration', () => {
   test.afterAll(async () => {
     const teardownScript = `
       import { PrismaClient } from '@prisma/client';
+      import fs from 'fs';
       const prisma = new PrismaClient();
       async function clean() {
         const users = await prisma.user.findMany({ where: { email: { in: ['${adminEmail}', '${newStaffEmail}'] } } });
@@ -29,6 +34,13 @@ test.describe('User Administration', () => {
         await prisma.user.deleteMany({
           where: { email: { in: ['${adminEmail}', '${newStaffEmail}'] } }
         });
+        if (fs.existsSync('admin_states_${runId}.json')) {
+          const states = JSON.parse(fs.readFileSync('admin_states_${runId}.json', 'utf8'));
+          for (const s of states) {
+            await prisma.user.update({ where: { id: s.id }, data: { isActive: s.isActive } });
+          }
+          fs.unlinkSync('admin_states_${runId}.json');
+        }
       }
       clean().finally(() => prisma.$disconnect());
     `;
@@ -96,25 +108,24 @@ test.describe('User Administration', () => {
     await expect(page.locator('.alert-danger')).toContainText(/Cannot deactivate your own account/i);
     await page.click('button:has-text("Cancel")');
 
-    // Last-active-Administrator safety behavior
-    await page.route('**/api/admin/users/*', async (route) => {
-      if (route.request().method() === 'PATCH') {
-        const postData = route.request().postDataJSON();
-        if (postData && postData.role === 'Requester') {
-          return route.fulfill({
-            status: 400,
-            body: JSON.stringify({ error: 'Cannot deactivate or change role of the last active Administrator' }), contentType: 'application/json'
-          });
-        }
-      }
-      route.fallback();
-    });
-
     await adminRow.locator('button:has-text("Edit")').click();
     await page.selectOption('select#roleSelect', 'Requester');
     await page.click('button:has-text("Save")');
     await expect(page.locator('.alert-danger')).toContainText(/last active Administrator/i);
     await page.click('button:has-text("Cancel")');
-    await page.unroute('**/api/admin/users/*');
+
+    const verifyScript = `
+      import { PrismaClient } from '@prisma/client';
+      const prisma = new PrismaClient();
+      async function verify() {
+        const user = await prisma.user.findUnique({ where: { email: '${adminEmail}' } });
+        if (!user || !user.isActive || user.role !== 'Administrator') {
+          console.error('State verification failed:', user);
+          process.exit(1);
+        }
+      }
+      verify().finally(() => prisma.$disconnect());
+    `;
+    execSync(`node --input-type=module -e "${verifyScript.replace(/\n/g, '')}"`, { cwd: '../server' });
   });
 });

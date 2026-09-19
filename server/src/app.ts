@@ -543,7 +543,9 @@ app.get("/api/tickets/:id", requireAuth, async (req: Request, res: Response): Pr
       include: {
         category: true,
         relatedSystem: true,
-        attachments: true
+        attachments: true,
+        requester: { select: { id: true, name: true, email: true, role: true } },
+        owner: { select: { id: true, name: true, email: true, role: true } }
       }
     });
 
