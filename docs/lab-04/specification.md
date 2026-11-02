@@ -19,17 +19,18 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 *   **Multi-Staff Work on Tickets:** The primary Ticket Owner coordinates the Ticket, while any active IT Staff member (or Administrator) can perform and record Actions Taken.
 *   **Dedicated Resolution Timestamp (`resolvedAt`) & Legacy Policy:** Adding `resolvedAt DateTime?` to `Ticket` to capture the definitive timestamp when a ticket reaches `Resolved`. Subsequent edits to Actions Taken or comment additions refresh `updatedAt` but leave `resolvedAt` untouched. Legacy resolved/closed tickets without historical resolution timestamps are backfilled with `resolvedAt = NULL` and excluded from 30-day "Recently Resolved" metrics and lists.
 *   **Complete Ticket Lifecycle & Outgoing Transitions from `Reopened`:** Full 8-state Ticket lifecycle (`New`, `Open`, `In Progress`, `Waiting for Requester`, `Resolved`, `Closed`, `Reopened`, `Cancelled`). Tickets in `Reopened` can transition to `In Progress` (staff resumes active work), `Open` (reset to queue), or `Waiting for Requester` (more info requested).
-*   **Authoritative Resolution Gate:** Strict backend enforcement blocking any attempt to transition a Ticket to `Resolved` unless the Ticket has at least one recorded Action Taken and a non-empty resolution comment.
+*   **Authoritative Resolution Gate:** Strict backend enforcement blocking any attempt to transition a Ticket to `Resolved` unless the Ticket has at least one recorded Action Taken (`actionCount >= 1`). Supplying a resolution comment is optional and creates a Public Comment if non-empty, but is NOT required to pass the Resolution Gate.
+*   **Append-Only Action Taken Revision History:** Every successful edit of an Action Taken (`PATCH /api/tickets/:id/actions/:actionId`) that modifies editable fields automatically appends an immutable revision record in `ActionTakenRevision`. Captures revision ID, parent `actionTakenId`, editor `editedById` (from authenticated session), server timestamp `editedAt`, and complete `beforeSnapshot` and `afterSnapshot` JSON objects covering all editable fields. Performer `performedById` remains immutable. Staff and Administrators can view complete revision timelines via a dedicated read-only endpoint (`GET /api/tickets/:id/actions/:actionId/revisions`), while Requesters are denied access (403 own / 404 unowned). Revision records cannot be edited, deleted, or truncated.
 *   **Comment-Driven Status Auto-Transitions:** When a Requester posts a Public Comment on a ticket in `Waiting for Requester`, the ticket automatically transitions to `Open`. When a Requester posts a Public Comment on a ticket in `Resolved` or `Closed`, the ticket automatically transitions to `Reopened` (clearing `resolvedAt = null`). Comments from Staff or Administrators do not trigger automatic transitions.
 *   **Advisory Requester Resolution:** Requesters may indicate that a problem "appears resolved" exclusively when a ticket is `In Progress`. This remains strictly advisory (appends a standardized Public Comment) and does not formally transition the Ticket status.
 *   **Atomic Compare-And-Swap (CAS) Concurrency Control:** Enforced via single conditional database mutations (`UPDATE ... WHERE id = :id AND updatedAt = :expectedTimestamp`) checking affected row counts. If 0 rows are updated, the backend queries existence to distinguish missing resources (HTTP 404) from concurrent/stale mutations (HTTP 409 Conflict). A database transaction alone is not claimed as sufficient CAS.
-*   **Dedicated Idempotency-Key Record Architecture:** Dedicated `IdempotencyKey` model with SHA-256 payload fingerprinting and compound uniqueness `[route, ticketId, userId, key]` with 24-hour expiration. Identical retries safely replay original responses with `Idempotency-Replayed: true`, while payload mismatches return HTTP 409 Conflict.
+*   **Dedicated Idempotency-Key Record Architecture:** Dedicated `IdempotencyKey` model with SHA-256 payload fingerprinting and compound uniqueness `[route, ticketId, userId, key]` with 24-hour expiration. An `Idempotency-Key` header (UUIDv4) is **mandatory** on Action Taken creation (`POST /api/tickets/:id/actions`) to prevent duplicate work records from repeated clicks or retries, while remaining **optional** on `POST /comments` and `POST /appears-resolved`. Identical retries safely replay original responses with `Idempotency-Replayed: true`, while payload mismatches return HTTP 409 Conflict.
 *   **Operational Dashboards:**
     *   *Requester Dashboard:* Authoritative summary of the authenticated Requester's tickets (My Open Tickets, Action Required / Waiting on You, In Progress, Recently Resolved, Closed), separate lists for Recently Updated Tickets and Recently Resolved Tickets (evaluated via `resolvedAt >= NOW() - 30 days`), quick action links, drill-down navigation, and four distinct UI states (Loading, Empty, Forbidden, Safe Failure).
     *   *IT Staff Dashboard:* Real-time operational triage summary (Unassigned Tickets, My Assigned Tickets, New, Open, In Progress, Waiting for Requester, and active IT Priority distribution), recently updated tickets queue, quick action links (excluding Ticket Creation per RBAC), queue filter drill-down, and four distinct UI states. Reopened tickets are actively counted in Unassigned/My Assigned and queue triage.
     *   *Administrator Dashboard:* Reuses Staff operational metrics via `/api/dashboard/admin` augmented with all five user statistics: Total Users, Active Requesters, Active Staff, Active Admins, and Inactive Users.
-*   **Data Integrity & Audit Preservation:** `ActionTaken` references `Ticket` with `onDelete: Restrict` to protect auditable records of technical work from accidental cascading deletion. Tickets are permanent audit records and cannot be hard-deleted via operational APIs.
-*   **Database Schema Increment, Safe Migration & Rollback:** Prisma migration adding `ActionTaken`, `IdempotencyKey`, `Ticket.updatedAt`, and `Ticket.resolvedAt`. Preserves existing Lab 1–3 data, defines legacy backfill behavior, establishes a realistic backup/recovery procedure for rollback, and implements idempotent seed data covering all required fixtures.
+*   **Data Integrity & Audit Preservation:** `ActionTaken` and `ActionTakenRevision` reference `Ticket` and `User` with `onDelete: Restrict` to protect auditable records of technical work and revision history from accidental cascading deletion. Originating from the repository owner's approved peer-review decision, Action Taken revision history provides full technical work auditability and staff accountability (not timesheet billing or labor-cost accounting). Tickets and revision records are permanent audit records and cannot be hard-deleted, updated, or truncated via operational APIs or direct database operations.
+*   **Database Schema Increment, Safe Migration & Rollback:** Prisma migration adding `ActionTaken`, `ActionTakenRevision`, `IdempotencyKey`, `Ticket.updatedAt`, and `Ticket.resolvedAt`. Preserves existing Lab 1–3 data, defines legacy backfill behavior, establishes a realistic backup/recovery procedure for rollback, and implements idempotent seed data covering all required fixtures.
 *   **Full Lab 1–3 Regression Preservation:** Unbroken functionality of Authentication, Sessions, RBAC, My Tickets, Staff Queue, Public Comments, Internal Notes, Attachments, and Administrator User Management.
 *   **Zen Green Design Language, Responsiveness & Accessibility:** Complete layout consistency across Desktop (1200px), Tablet (800px), and Mobile (400px) viewports using responsive grid and wrapping without blanket `overflow-x: hidden`, with full keyboard accessibility (Tab, Enter, Space, Escape) and screen-reader ARIA labeling.
 
@@ -37,7 +38,7 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 *   Automatic SLA clocks, escalation countdown timers, on-call scheduling, and automated breach notifications.
 *   External notifications (email, SMS, LINE, web push).
 *   Inventory consumption, spare-parts tracking, purchasing workflows, or cost accounting.
-*   Timesheet billing, payroll logging, or detailed labor-cost calculations.
+*   Timesheet billing, payroll logging, or detailed labor-cost calculations (Actions Taken serve exclusively for technical work auditability, troubleshooting history, and staff accountability).
 *   Multi-level managerial approval workflows and electronic signature capture.
 *   Advanced business-intelligence tools, ad-hoc report builders, or external data warehouse exports.
 *   Hard deletion of tickets via API endpoints.
@@ -49,17 +50,18 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 ## 4. Functional Requirements
 
 ### 4.1 Actions Taken
-*   **FR-01 [Actions Taken - Data Entry & Idempotency]:** The system shall allow authorized IT Staff and Administrators to log an Action Taken against an existing Ticket with: Action Date/Time (`actionDateTime`, ISO string, defaults to now, cannot be future), Action Description (`actionDescription`, 1–2000 chars), Result (`result`, 1–2000 chars), Follow-Up Required toggle (`followUpRequired`, boolean), Follow-up Note (`followUpNote`, mandatory if follow-up required, null if false), Attachment Notes (`attachmentNotes`, optional, max 500 chars), and support `Idempotency-Key` header (UUIDv4) to prevent retry duplicates.
+*   **FR-01 [Actions Taken - Data Entry & Mandatory Idempotency]:** The system shall allow authorized IT Staff and Administrators to log an Action Taken against an existing Ticket with: Action Date/Time (`actionDateTime`, ISO string, defaults to now, cannot be future), Action Description (`actionDescription`, 1–2000 chars), Result (`result`, 1–2000 chars), Follow-Up Required toggle (`followUpRequired`, boolean), Follow-up Note (`followUpNote`, mandatory if follow-up required, null if false), Attachment Notes (`attachmentNotes`, optional, max 500 chars). Action Taken creation shall **mandatorily require** an `Idempotency-Key` header (UUIDv4); requests with missing or non-UUIDv4 keys shall be rejected with HTTP 400 Bad Request before any domain mutation (no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh).
 *   **FR-02 [Actions Taken - Automated Actor]:** The system shall automatically record the authenticated user's ID as `performedById` from the active session (`req.user.id`). Manual override or spoofing of the actor shall be prevented.
 *   **FR-03 [Actions Taken - Multi-Staff Collaboration]:** The system shall permit any active IT Staff member or Administrator to log an Action Taken on a Ticket, regardless of who is currently designated as the primary Ticket Owner.
 *   **FR-04 [Actions Taken - Full Update Support via CAS]:** The system shall allow authorized IT Staff and Administrators to update existing Actions Taken (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`) using atomic Compare-And-Swap concurrency (`actionLastUpdatedAt`). The performer `performedById` shall remain strictly read-only and immutable.
+*   **FR-04b [Actions Taken - Append-Only Revision History]:** Originating from the repository owner's approved peer-review decision, the system shall automatically record an immutable revision record in `ActionTakenRevision` upon every successful edit of an Action Taken where one or more editable fields change. The revision record shall capture editor identity (`editedById`), server timestamp (`editedAt`), and complete before- and after-value snapshots of editable fields (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`). Revision creation shall be atomic with the Action Taken update and parent Ticket `updatedAt` refresh. If the edit request produces no field changes (no-op), no revision record is created. The system shall provide a read-only endpoint `GET /api/tickets/:id/actions/:actionId/revisions` for IT Staff and Administrators. No API shall exist to modify or delete revision records.
 *   **FR-05 [Actions Taken - Parent Timestamp Refresh]:** Both creating and updating an Action Taken shall update the parent Ticket's `updatedAt` timestamp atomically within the same database transaction.
-*   **FR-06 [Actions Taken - Requester Visibility & Ordering]:** The system shall allow Requesters to view all Actions Taken recorded on Tickets they own in deterministic chronological order (`actionDateTime ASC, id ASC`). Requesters shall not have permission to create, edit, or delete Actions Taken.
+*   **FR-06 [Actions Taken - Requester Visibility & Ordering]:** The system shall allow Requesters to view all Actions Taken recorded on Tickets they own in deterministic chronological order (`actionDateTime ASC, id ASC`). Requesters shall not have permission to create, edit, or delete Actions Taken, nor access internal revision histories.
 
 ### 4.2 Ticket Workflow & Resolution Gate
-*   **FR-07 [Ticket Workflow - Transition Enforcement]:** The system shall enforce the approved 13-row transition matrix on all Ticket status update requests, rejecting unauthorized transitions with HTTP 400 Bad Request.
-*   **FR-08 [Ticket Workflow - Resolution Gate & `resolvedAt`]:** The system shall block any attempt to transition a Ticket to `Resolved` unless the Ticket has at least one recorded Action Taken and a non-empty resolution comment. Upon successful transition to `Resolved`, the system shall populate `Ticket.resolvedAt = NOW()`.
-*   **FR-09 [Ticket Workflow - Outgoing Transitions from Reopened]:** The system shall permit Tickets in `Reopened` to transition to: (1) `In Progress` (requires `ownerId != null`), (2) `Open` (resets to open pool), or (3) `Waiting for Requester` (requires public comment). Direct transitions from `Reopened` to `Resolved` or `Closed` without returning to work shall be rejected with HTTP 400 Bad Request.
+*   **FR-07 [Ticket Workflow - Transition & Source-Target Owner Enforcement]:** The system shall enforce the approved 13-row transition matrix on all Ticket status update requests, rejecting unauthorized transitions with HTTP 400 Bad Request. An assigned Ticket Owner (`ownerId != null`) shall be strictly required only for three specific source-to-target transition pairs: (1) `New` $\rightarrow$ `Open`, (2) `Open` $\rightarrow$ `In Progress`, and (3) `Reopened` $\rightarrow$ `In Progress`. Other transitions (`Waiting for Requester` $\rightarrow$ `Open`, `Waiting for Requester` $\rightarrow$ `In Progress`, `Reopened` $\rightarrow$ `Open`, `Reopened` $\rightarrow$ `Waiting for Requester`) shall succeed without an assigned owner (`ownerId = null`). Missing owner on required transitions shall be rejected with HTTP 400 Bad Request (`"Ticket must be assigned to an owner before transitioning from '{source}' to '{target}'."`).
+*   **FR-08 [Ticket Workflow - Resolution Gate & `resolvedAt`]:** The system shall block any attempt to transition a Ticket to `Resolved` unless the Ticket has at least one recorded Action Taken (`actionCount >= 1`). Supplying a resolution comment is optional; if provided and non-empty, a `PublicComment` is created atomically; if omitted or blank, no error is returned and no empty comment is created. Upon successful transition to `Resolved`, the system shall populate `Ticket.resolvedAt = NOW()`.
+*   **FR-09 [Ticket Workflow - Outgoing Transitions from Reopened]:** The system shall permit Tickets in `Reopened` to transition to: (1) `In Progress` (requires `ownerId != null`), (2) `Open` (resets to open pool, does NOT require owner), or (3) `Waiting for Requester` (requires public comment, does NOT require owner). Direct transitions from `Reopened` to `Resolved` or `Closed` without returning to work shall be rejected with HTTP 400 Bad Request.
 *   **FR-10 [Ticket Workflow - Comment-Driven Auto-Transitions & Concurrency]:** The system shall automatically transition Ticket status upon Requester Public Comment submission:
     *   `Waiting for Requester` -> `Open`
     *   `Resolved` -> `Reopened` (resets `resolvedAt = null`)
@@ -67,7 +69,7 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
     The auto-transition shall require the Ticket's expected `lastUpdatedAt` token in the request payload and execute an atomic conditional update (`WHERE id = :ticketId AND status = :expectedStatus AND updatedAt = :lastUpdatedAt`) within the transaction. If 0 rows are affected, the backend shall check existence and ownership before deciding between HTTP 404 Not Found (non-enumeration) and HTTP 409 Conflict (stale token, concurrent status change, concurrent non-status modification, or ABA transition), rolling back the transaction without persisting an inconsistent comment. Comments submitted by IT Staff or Administrators shall not alter the Ticket status automatically.
 *   **FR-11 [Ticket Workflow - Advisory Resolution Feedback]:** The system shall permit Requesters to indicate that a problem "appears resolved" exclusively when the Ticket is `In Progress`. The backend shall require the Ticket's expected `lastUpdatedAt` token and execute an atomic conditional check (`WHERE id = :ticketId AND status = 'In Progress' AND updatedAt = :lastUpdatedAt`). If 0 rows are affected, the system checks existence and ownership (distinguishing 404 Not Found from 409 Conflict) and rolls back the transaction. This action shall append a standardized Public Comment and shall NOT alter the Ticket status.
 *   **FR-12 [Ticket Workflow - Atomic CAS Concurrency Control]:** The system shall require optimistic locking tokens on all state mutations (`lastUpdatedAt` for Ticket status changes, Public Comments, and Advisory Resolution feedback; `actionLastUpdatedAt` for Action Taken edits). The backend shall execute single conditional `UPDATE ... WHERE id = :id [AND status = :expectedStatus] AND updatedAt = :token` mutations. If 0 rows are affected, the backend shall check entity existence (and ownership under non-enumeration rules): if the entity does not exist or is inaccessible, the API shall return HTTP 404 Not Found; if the entity exists, the API shall return HTTP 409 Conflict (stale concurrency token, concurrent modification, or ABA status change). If the token is omitted, the API shall return HTTP 400 Bad Request.
-*   **FR-13 [Idempotency-Key Architecture]:** Mutation endpoints (`POST /actions`, `POST /comments`, `POST /appears-resolved`) shall support the `Idempotency-Key` header (UUIDv4) as an **optional** header. If provided, the system validates against `IdempotencyKey` scoped to compound key `[route, ticketId, userId, key]`:
+*   **FR-13 [Idempotency-Key Architecture]:** Mutation endpoints shall support the `Idempotency-Key` header (UUIDv4). The header is **mandatory** on Action Taken creation (`POST /api/tickets/:id/actions`), where missing or malformed keys are rejected with HTTP 400 Bad Request without database or timestamp mutation, and **optional** on `POST /api/tickets/:id/comments` and `POST /api/tickets/:id/appears-resolved`. If provided, the system validates against `IdempotencyKey` scoped to compound key `[route, ticketId, userId, key]`:
     *   *Replay:* If a matching payload SHA-256 fingerprint arrives, the system safely replays the stored response with original HTTP status and header `Idempotency-Replayed: true`.
     *   *Payload Mismatch:* If the key is reused with a different payload, the system returns HTTP 409 Conflict.
     *   *PostgreSQL P2002 Collision Handling:* In PostgreSQL, competing inserts block waiting for the first transaction: if the first rolls back, the second insert proceeds normally; if the first commits, the second receives `P2002`. The backend intercepts specifically the `IdempotencyKey` compound unique constraint, queries the committed scoped record, and replays on matching hash or returns HTTP 409 on mismatch. If no record is found (exceptional race such as concurrent TTL purge), a safe bounded recheck policy is applied before returning HTTP 409 Conflict.
@@ -108,18 +110,31 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 ## 5. Business Rules
 
 ### 5.1 Actions Taken Rules
-*   **BR-01 [Single Ticket Parent & Audit Retention]:** An Action Taken record belongs to exactly one Ticket (`ticketId` is mandatory and immutable). To preserve technical audit history, `ActionTaken` has an `onDelete: Restrict` relation to `Ticket`. Tickets with Actions Taken cannot be deleted. Operational APIs shall not expose ticket deletion.
+*   **BR-01 [Single Ticket Parent & Audit Retention]:** An Action Taken record belongs to exactly one Ticket (`ticketId` is mandatory and immutable). To preserve technical audit history, `ActionTaken` has an `onDelete: Restrict` relation to `Ticket`. Tickets with Actions Taken cannot be deleted. Operational APIs shall not expose ticket deletion. Creating an Action Taken strictly requires a valid `Idempotency-Key` header (UUIDv4) to prevent duplicate work records from repeated clicks or retries.
 *   **BR-02 [Independent Staff Work]:** The primary Ticket Owner coordinates the Ticket, but an Action Taken may be performed and logged by any active IT Staff member or Administrator.
 *   **BR-03 [Automated Author Binding]:** The `performedById` attribute must be bound directly from the authenticated session (`req.user.id`). It cannot be supplied, selected from a client dropdown, or edited later.
 *   **BR-04 [Editable Fields & Conditional Validation]:** When editing an Action Taken via `PATCH`, authorized staff may modify `actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, and `attachmentNotes`. When `followUpRequired` is `true`, `followUpNote` is mandatory (1–2000 non-whitespace characters). When `followUpRequired` is `false`, `followUpNote` must be submitted as `null`.
+*   **BR-04b [Append-Only Action Taken Revision History & Immutability]:** Originating from the repository owner's approved peer-review decision (not required by Handout Section 4.3), this feature ensures technical work auditability and staff accountability:
+    1.  *Automatic Generation:* A successful `PATCH` that modifies one or more editable fields (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`) must append exactly one `ActionTakenRevision` record.
+    2.  *Complete Snapshots:* Each revision records full `beforeSnapshot` and `afterSnapshot` JSON objects capturing all editable fields at the time of modification.
+    3.  *Author & Timestamp Integrity:* `editedById` is strictly bound to the authenticated session (`req.user.id`); `editedAt` is generated by the server (`NOW()`). Neither can be supplied or overridden by client payload. Original `performedById` remains strictly immutable.
+    4.  *Immutability & Audit Retention:* Revisions are strictly append-only. There are no API endpoints to modify or delete revisions. Relations to `ActionTaken` and `User` enforce `onDelete: Restrict`.
+    5.  *Transaction Atomicity:* Reading the before-state, CAS row validation, conditional update, revision insertion, and parent Ticket `updatedAt` refresh execute in a single database transaction. If any step fails (e.g. CAS 0 rows affected), the entire transaction rolls back and no revision is created.
+    6.  *No-Op Edits:* If an edit request produces no actual changes to editable fields, the operation is a no-op: no revision is appended.
+    7.  *Role Boundaries:* Revision history is accessible to IT Staff and Administrators via `GET /api/tickets/:id/actions/:actionId/revisions`. Requesters receive HTTP 403 Forbidden on own tickets (and 404 on unowned tickets under non-enumeration rules).
 *   **BR-05 [Attachment Cross-Referencing & Length]:** `attachmentNotes` is an optional descriptive string (up to 500 characters) referencing associated attachment filenames. If exceeded, validation returns HTTP 400 Bad Request.
 *   **BR-06 [Active Staff Requirement]:** The actor performing or editing an Action Taken must be an active user with role `IT Staff` or `Administrator`. Inactive users cannot record or edit actions.
 *   **BR-07 [Requester Read-Only Access]:** Requesters can view Actions Taken only on Tickets they own. Any attempt by a Requester to create, update, or delete an Action Taken must be rejected with HTTP 403 Forbidden.
-*   **BR-08 [Timeline Ordering]:** Actions Taken must be retrieved and displayed in chronological order: `ORDER BY actionDateTime ASC, id ASC`.
+*   **BR-08 [Timeline Ordering]:** Actions Taken must be retrieved and displayed in chronological order: `ORDER BY actionDateTime ASC, id ASC`. Revisions are retrieved in chronological order: `ORDER BY editedAt ASC, id ASC`.
 *   **BR-09 [Parent Timestamp Synchronization]:** Every `POST` and `PATCH` on an Action Taken must refresh the parent Ticket's `updatedAt` to the current transaction timestamp.
 
 ### 5.2 Ticket Lifecycle & Status Transition Rules
-*   **BR-10 [Permitted Status Transitions Matrix]:** Ticket status changes via `PATCH /api/staff/tickets/:id/status` must strictly adhere to the 13 permitted transitions below. All unpermitted transitions must be rejected with HTTP 400 Bad Request.
+*   **BR-10 [Permitted Status Transitions Matrix & Exact Source-Target Owner Rules]:** Ticket status changes via `PATCH /api/staff/tickets/:id/status` must strictly adhere to the 13 permitted transitions below. All unpermitted transitions must be rejected with HTTP 400 Bad Request.
+    *   **Exact Source-Target Owner Rule:** An assigned Ticket Owner (`ownerId != null`) is mandatory **only** for three specific source-to-target transition pairs:
+        1. `New` $\rightarrow$ `Open`
+        2. `Open` $\rightarrow$ `In Progress`
+        3. `Reopened` $\rightarrow$ `In Progress`
+    *   All other transitions (`Waiting for Requester` $\rightarrow$ `Open`, `Waiting for Requester` $\rightarrow$ `In Progress`, `Reopened` $\rightarrow$ `Open`, `Reopened` $\rightarrow$ `Waiting for Requester`, etc.) do **not** require an assigned owner and succeed when `ownerId = null`. Missing owner on required transitions returns HTTP 400 Bad Request (`"Ticket must be assigned to an owner before transitioning from '{source}' to '{target}'."`).
 
 | # | Source Status | Target Status | Authorized Roles | Required Conditions / Side Effects |
 |---|---|---|---|---|
@@ -128,13 +143,13 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 | 3 | `Open` | `In Progress` | IT Staff | Ticket must have an assigned owner (`ownerId != null`). |
 | 4 | `Open` | `Waiting for Requester` | IT Staff | Public `comment` is required; generates a `PublicComment`. |
 | 5 | `In Progress` | `Waiting for Requester` | IT Staff | Public `comment` is required; generates a `PublicComment`. |
-| 6 | `Waiting for Requester` | `In Progress` | IT Staff | Staff resumes active work. |
-| 7 | `Waiting for Requester` | `Open` | IT Staff | Staff resets ticket to open queue. |
-| 8 | `In Progress` | `Resolved` | IT Staff | **Resolution Gate (BR-12)**: requires `>= 1` Action Taken AND non-empty resolution `comment` (creates `PublicComment`); **sets `resolvedAt = NOW()`**. |
+| 6 | `Waiting for Requester` | `In Progress` | IT Staff | Staff resumes active work. (Owner NOT required; `ownerId` may be null). |
+| 7 | `Waiting for Requester` | `Open` | IT Staff | Staff resets ticket to open queue. (Owner NOT required; `ownerId` may be null). |
+| 8 | `In Progress` | `Resolved` | IT Staff | **Resolution Gate (BR-12)**: requires `>= 1` Action Taken (`actionCount >= 1`). Optional non-empty comment creates `PublicComment`; **sets `resolvedAt = NOW()`**. |
 | 9 | `Resolved` | `Closed` | IT Staff | Final closure confirmation; preserves `resolvedAt`. |
 | 10| `Closed` | `Reopened` | IT Staff | Exceptionally reopened; requires `reason` (creates `InternalNote`); **clears `resolvedAt` to `null`**. |
 | 11| `Reopened` | `In Progress` | IT Staff | Staff resumes active work; ticket must have an assigned owner (`ownerId != null`); retains already-null `resolvedAt` value. |
-| 12| `Reopened` | `Open` | IT Staff | Staff resets ticket to open pool; retains already-null `resolvedAt` value. |
+| 12| `Reopened` | `Open` | IT Staff | Staff resets ticket to open pool (Owner NOT required; `ownerId` may be null); retains already-null `resolvedAt` value. |
 | 13| `Reopened` | `Waiting for Requester` | IT Staff | Staff requests additional information; requires public `comment` (creates `PublicComment`); retains already-null `resolvedAt` value. |
 
 *   **Distinct Comment-Driven Requester Transitions (Reconciled with Matrix):**
@@ -153,9 +168,9 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
     *   *Rule:* Transitioning a Ticket to `Resolved` strictly requires:
         1. Current status is `In Progress`.
         2. At least one associated `ActionTaken` record exists on the Ticket (`actionCount >= 1`).
-        3. A non-empty resolution `comment` is supplied (which automatically creates a `PublicComment`).
-        4. Setting `Ticket.resolvedAt = NOW()`.
-    *   *Justification:* Technical work and user communication are distinct responsibilities. Requiring both guarantees that: (a) actual engineering effort is documented in an auditable Action Taken record, and (b) the requester receives clear written explanation of the resolution. This prevents "drive-by closures" without technical evidence.
+        3. Setting `Ticket.resolvedAt = NOW()`.
+    *   *Optional Resolution Comment:* Supplying a resolution comment is strictly **optional**. If a non-empty comment is provided, the system creates a `PublicComment` within the same transaction. If omitted or whitespace-only, the resolution succeeds without error and no empty `PublicComment` is created. A resolution comment is **never required** to pass the Resolution Gate.
+    *   *Justification:* The Resolution Gate guarantees that technical effort is documented in an auditable Action Taken record before a ticket is marked resolved, preventing drive-by closures without technical work. While communication with the requester remains good practice and is supported via optional comments, requiring a redundant comment when thorough actions are already recorded creates artificial friction.
     *   *Legacy Ticket Policy:* Existing Lab 1–3 tickets that were already in `Resolved` or `Closed` status prior to Lab 4 remain valid. Because trustworthy resolution timestamps do not exist for legacy records, they are backfilled with `resolvedAt = NULL`. Queries for Recently Resolved metrics strictly require `resolvedAt IS NOT NULL AND resolvedAt >= NOW() - 30 days`, cleanly excluding unverified legacy records from 30-day windows. Any legacy ticket transitioned or re-resolved in Lab 4 sets `resolvedAt = NOW()`.
 *   **BR-13 [Advisory Requester Resolution]:** When a Requester triggers "Problem Appears Resolved":
     1.  The action is permitted ONLY when the Ticket status is `In Progress`.
@@ -168,12 +183,14 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
         If the affected row count is 0, the server queries for existence: if the entity does not exist or is invisible under non-enumeration rules, returns HTTP 404; if it exists but timestamps differed, returns HTTP 409 Conflict.
     *   *Action Taken Mutation:* `PATCH /api/tickets/:id/actions/:actionId` requires `actionLastUpdatedAt`. The database mutation must execute:
         `UPDATE "ActionTaken" SET ... WHERE id = :id AND "ticketId" = :ticketId AND "updatedAt" = :actionLastUpdatedAt`
-        If the affected row count is 0, the server queries for existence: if the entity does not exist or is inaccessible, returns HTTP 404 Not Found; if it exists but timestamps differed, returns HTTP 409 Conflict. Upon successful update, parent `Ticket.updatedAt` is updated within the same transaction.
+        If the affected row count is 0, the server queries for existence: if the entity does not exist or is inaccessible, returns HTTP 404 Not Found; if it exists but timestamps differed, returns HTTP 409 Conflict. Upon successful update, revision is recorded and parent `Ticket.updatedAt` is updated within the same transaction.
     *   *Comment & Advisory State-Conditional Updates:* `POST /comments` and `POST /appears-resolved` require `lastUpdatedAt` and execute atomic conditional updates matching the expected status and timestamp (`status = :expectedStatus AND "updatedAt" = :lastUpdatedAt`). If 0 rows are affected due to concurrent status changes, non-status updates (owner/priority reassignment), or ABA transitions, the server checks existence and ownership before returning HTTP 404 (absent/unowned) or HTTP 409 Conflict, rolling back the entire transaction.
     *   *Missing Token:* If `lastUpdatedAt` or `actionLastUpdatedAt` is omitted in mutation payloads, the server rejects the request with HTTP 400 Bad Request.
 *   **BR-15 [Dedicated Idempotency-Key Architecture & CAS Concurrency Interaction]:**
     *   *Scope:* Scoped to compound key `[route, ticketId, userId, key]`.
-    *   *Header:* Clients may supply `Idempotency-Key: <UUIDv4>` on `POST` mutation requests (`/actions`, `/comments`, `/appears-resolved`). The header is **optional** on all three endpoints; if omitted, requests execute normally without deduplication.
+    *   *Header Requirement:*
+        - `POST /api/tickets/:id/actions`: `Idempotency-Key: <UUIDv4>` is **MANDATORY**. Missing or non-UUIDv4 key returns HTTP 400 Bad Request before any domain mutation (no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh).
+        - `POST /api/tickets/:id/comments` and `POST /api/tickets/:id/appears-resolved`: `Idempotency-Key: <UUIDv4>` is **OPTIONAL**. If omitted, requests execute normally without deduplication.
     *   *Fingerprint Validation & Replay:* Requests compute a SHA-256 hash of canonical JSON payload. If the key exists:
         - Matching hash: safely replays the original response with stored HTTP status and header `Idempotency-Replayed: true`.
         - Mismatched hash: rejects with HTTP 409 Conflict (`"Idempotency key reused with different request payload"`).
@@ -181,7 +198,7 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
         1.  **Phase 1 (Reservation Claim):** Immediately upon entering `$transaction`, the server claims the slot: `tx.idempotencyKey.create({ data: { key, route, ticketId, userId, requestHash, statusCode: null, responseBody: null, expiresAt } })`. In PostgreSQL, this places an exclusive tuple lock on the compound unique index `[route, ticketId, userId, key]`. Competing Request 2 immediately blocks on this index tuple lock *before* evaluating Ticket CAS.
         2.  **Phase 2 (CAS & Finalization):** Request 1 executes Ticket CAS and domain operations (ActionTaken or PublicComment and parent `updatedAt` refresh). Upon success, Request 1 finalizes the reservation: `tx.idempotencyKey.update({ where: { id: reservation.id }, data: { statusCode: 201, responseBody: JSON.stringify(result) } })`, and commits.
         3.  **Outcome Resolution:** When Request 1 commits, Request 2 unblocks at Phase 1. Because Request 1 committed the unique index entry, Request 2 receives unique constraint violation `P2002` (SQLSTATE `23505`). Request 2 aborts without ever evaluating Ticket CAS, catches `P2002`, queries the committed record, and replays the response with `Idempotency-Replayed: true` (or returns 409 if `requestHash` differs). If Request 1 rolls back, Request 2 unblocks, its reservation succeeds, and Request 2 proceeds to evaluate CAS.
-        4.  **Distinct / Non-Idempotent Mutations:** Requests without an `Idempotency-Key` (or with different keys) do not block on `IdempotencyKey` and evaluate Ticket CAS directly. When `updatedAt` mismatches, 0 rows are affected and the server returns genuine HTTP 409 Conflict, preserving CAS concurrency protection.
+        4.  **Distinct / Non-Idempotent Mutations:** Requests without an `Idempotency-Key` (on optional endpoints) or with distinct keys do not block on `IdempotencyKey` and evaluate Ticket CAS directly. When `updatedAt` mismatches, 0 rows are affected and the server returns genuine HTTP 409 Conflict, preserving CAS concurrency protection.
     *   *Expired-Key Handling:* Keys expire after 24 hours (`expiresAt <= NOW()`). Before inserting, the server deletes any expired record (`DELETE WHERE id = :existingId`) so the unique constraint does not block legitimate key reuse after 24 hours.
     *   *Distinct Submissions:* Separate legitimate work entries must use distinct UUIDs; both persist normally.
 
@@ -232,6 +249,7 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 | View Actions Taken on Ticket | Deny (401) | Allow (Own Ticket) | Allow (All) | Allow (All) |
 | Create Action Taken | Deny (401) | Deny (403) | Allow | Allow |
 | Update Action Taken | Deny (401) | Deny (403) | Allow | Allow |
+| View Action Taken Revision History | Deny (401) | Deny (403) | Allow | Allow |
 | Change Ticket Status | Deny (401) | Deny (403)* | Allow | Deny (403) |
 | Resolve Ticket (Pass Resolution Gate) | Deny (401) | Deny (403) | Allow | Deny (403) |
 | Trigger "Appears Resolved" (Advisory) | Deny (401) | Allow (Own `In Progress`) | Deny (403) | Deny (403) |
@@ -255,10 +273,10 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
     *   *Resolution:* All previous RBAC open questions are closed under this conservative baseline. An explicit future instructor clarification may expand Administrator permissions, but the contract strictly enforces the preserved Lab 3 baseline.
 
 ### 5.5 Explicit Error Policy
-*   **HTTP 400 Bad Request:** Payload validation failures (missing required fields, summary > 100 chars, description > 1000 chars, follow-up note missing when required, attachmentNotes > 500 chars, missing `lastUpdatedAt` / `actionLastUpdatedAt` token across Ticket status, ActionTaken edit, Public Comment, or Advisory Resolution, invalid transition, or failing Resolution Gate).
+*   **HTTP 400 Bad Request:** Payload validation failures (missing required fields, summary > 100 chars, description > 1000 chars, follow-up note missing when required, attachmentNotes > 500 chars, missing or malformed `Idempotency-Key` on Action Taken creation, missing owner on transitions requiring an assigned owner [`New->Open`, `Open->In Progress`, `Reopened->In Progress`], missing `lastUpdatedAt` / `actionLastUpdatedAt` token across Ticket status, ActionTaken edit, Public Comment, or Advisory Resolution, invalid transition, or failing Resolution Gate with 0 actions).
 *   **HTTP 401 Unauthorized:** Missing, expired, or invalid session cookie.
-*   **HTTP 403 Forbidden:** Authenticated user lacks permission for the endpoint.
-*   **HTTP 404 Not Found (Non-Enumeration):** Resource does not exist OR user requests a Ticket, Attachment, or Action Taken belonging to another Requester.
+*   **HTTP 403 Forbidden:** Authenticated user lacks permission for the endpoint (e.g. Requester attempting Action mutation or revision access; Administrator attempting status transition or comments).
+*   **HTTP 404 Not Found (Non-Enumeration):** Resource does not exist OR user requests a Ticket, Attachment, Action Taken, or Revision belonging to another Requester.
 *   **HTTP 409 Conflict:** Atomic conditional update affected 0 rows (stale update, concurrent status change, concurrent non-status modification, or ABA transition), idempotency key payload mismatch, concurrent idempotency reconciliation race, or duplicate email during user creation.
 *   **HTTP 500 Internal Server Error:** Unexpected server-side failure. Returns a safe, generic message (`{ error: "Internal server error" }`).
 
@@ -270,9 +288,9 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 *   **Requester Dashboard:** High-level summary displaying 5 metric cards (`My Open Tickets`, `Action Required / Waiting on You`, `In Progress`, `Recently Resolved`, `Closed`), two separate lists for Recently Updated Tickets and Recently Resolved Tickets (30-day boundary via `resolvedAt`), quick action buttons (`+ Create Ticket`, `View My Tickets`), and 4 explicit UI states (Loading, Empty, Forbidden, Safe Failure).
 *   **IT Staff Dashboard:** Operational triage center displaying 6 metric cards (`Unassigned`, `My Assigned`, `New`, `Open`, `In Progress`, `Waiting for Requester`), priority breakdown indicators, Recently Updated Queue items, quick action buttons (`Search Tickets`, `My Queue`, `Unassigned Queue` — strictly omitting ticket creation), and 4 explicit UI states.
 *   **Actions Taken Interface on Ticket Detail:**
-    *   *Staff Ticket Detail:* Positioned prominently above `CommunicationArea`. Features an "Actions Taken" timeline in deterministic chronological order (`actionDateTime ASC, id ASC`), a `+ Add Action Taken` button triggering create mode, and inline/modal `Edit` controls supporting all editable fields while displaying the immutable original performer. Form generates client-side `Idempotency-Key: uuidv4()`.
-    *   *Requester Ticket Detail:* Renders a read-only timeline of Actions Taken above `CommunicationArea`, allowing Requesters to review all technical steps taken on their ticket.
-*   **Resolution Gate Feedback:** In the Staff status transition dropdown, selecting `Resolved` displays dynamic inline verification: if the ticket has 0 Actions Taken, the submit button is disabled and a warning alert explains that an Action Taken must be logged before the ticket can be resolved.
+    *   *Staff Ticket Detail:* Positioned prominently above `CommunicationArea`. Features an "Actions Taken" timeline in deterministic chronological order (`actionDateTime ASC, id ASC`), a `+ Add Action Taken` button triggering create mode, inline/modal `Edit` controls supporting all editable fields while displaying the immutable original performer, and a `View Edit History` action opening a modal with chronological before/after revision snapshots. Create form generates client-side `Idempotency-Key: uuidv4()` and reuses it on retries.
+    *   *Requester Ticket Detail:* Renders a read-only timeline of Actions Taken above `CommunicationArea`, allowing Requesters to review all technical steps taken on their ticket without internal revision history controls.
+*   **Resolution Gate Feedback:** In the Staff status transition dropdown, selecting `Resolved` displays dynamic inline verification: if the ticket has 0 Actions Taken, the submit button is disabled and a warning alert explains that at least one Action Taken must be logged before the ticket can be resolved. If >= 1 Action Taken exists, the confirmation button is enabled immediately; supplying an optional resolution comment is supported but does NOT disable the button if left blank.
 *   **Status Transition Dropdown Alignment:** Displays only valid transitions based on the 13-row transition matrix (e.g. for `Reopened` tickets, displays `In Progress`, `Open`, and `Waiting for Requester`).
 *   **Restoration of Requester Ticket Detail:** Addressing the Lab 3 audit finding, `TicketDetail.tsx` is updated to render `<CommunicationArea>` directly below Actions Taken, restoring Public Comments and the advisory "Problem Appears Resolved" button.
 *   **Duplicate Click Prevention & Conflict Preservation:** Submit buttons disable immediately on click with a spinner. If a 409 Conflict occurs, the UI displays a detailed alert and preserves unsaved user draft inputs rather than silently discarding them.
@@ -283,28 +301,44 @@ Stakeholders require a reliable way to plan, perform, and track actual technical
 ## 7. Data Changes
 
 ### 7.1 Prisma Models & Schema Extensions
-The PostgreSQL schema requires the addition of the `ActionTaken` model, `IdempotencyKey` model, and enhancements to `Ticket`:
+The PostgreSQL schema requires the addition of the `ActionTaken` model, `ActionTakenRevision` model, `IdempotencyKey` model, and enhancements to `Ticket`:
 
 ```prisma
 model ActionTaken {
-  id                Int      @id @default(autoincrement())
+  id                Int                   @id @default(autoincrement())
   ticketId          Int
-  actionDateTime    DateTime @default(now())
+  actionDateTime    DateTime              @default(now())
   actionDescription String
   result            String
   performedById     Int
-  followUpRequired  Boolean  @default(false)
+  followUpRequired  Boolean               @default(false)
   followUpNote      String?
   attachmentNotes   String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt @default(now())
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt @default(now())
 
   // Relations: Protect audit history with onDelete: Restrict
-  ticket            Ticket   @relation(fields: [ticketId], references: [id], onDelete: Restrict)
-  performedBy       User     @relation("ActionPerformer", fields: [performedById], references: [id], onDelete: Restrict)
+  ticket            Ticket                @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  performedBy       User                  @relation("ActionPerformer", fields: [performedById], references: [id], onDelete: Restrict)
+  revisions         ActionTakenRevision[]
 
   @@index([ticketId])
   @@index([performedById])
+}
+
+model ActionTakenRevision {
+  id             String      @id @default(uuid())
+  actionTakenId  Int
+  editedById     Int
+  editedAt       DateTime    @default(now())
+  beforeSnapshot Json        // Complete snapshot of editable fields prior to modification
+  afterSnapshot  Json        // Complete snapshot of editable fields after modification
+
+  actionTaken    ActionTaken @relation(fields: [actionTakenId], references: [id], onDelete: Restrict)
+  editedBy       User        @relation("ActionRevisionEditor", fields: [editedById], references: [id], onDelete: Restrict)
+
+  @@index([actionTakenId, editedAt])
+  @@index([editedById])
 }
 
 model IdempotencyKey {
@@ -339,37 +373,79 @@ And in `model User`:
 ```prisma
 model User {
   // ... existing fields ...
-  actionsPerformed  ActionTaken[] @relation("ActionPerformer")
+  actionsPerformed      ActionTaken[]         @relation("ActionPerformer")
+  editedActionRevisions ActionTakenRevision[] @relation("ActionRevisionEditor")
   // ...
 }
 ```
 
 ### 7.2 Database Design Decisions & Justifications
 1.  **Decision 1: Audit Retention with `onDelete: Restrict`:**
-    *   *Rationale:* Actions Taken represent immutable technical work records and legal audit trails. Setting `onDelete: Restrict` prevents accidental cascade deletion of tickets that contain recorded actions. TokTickIT tickets are permanent and cannot be hard-deleted via API.
+    *   *Rationale:* Actions Taken represent immutable technical work records and legal audit trails. Setting `onDelete: Restrict` on `Ticket` and `User` relations prevents accidental cascade deletion of tickets or staff accounts that contain recorded actions. TokTickIT tickets are permanent and cannot be hard-deleted via API.
 2.  **Decision 2: Dedicated `resolvedAt` Column on `Ticket` with NULL Legacy Policy:**
     *   *Rationale:* `Ticket.updatedAt` changes whenever comments, attachments, or Actions Taken are added/modified. Storing a dedicated `resolvedAt DateTime?` guarantees that subsequent activity on resolved tickets does not falsely alter their resolution age or corrupt the 30-day "Recently Resolved" dashboard metric. Legacy tickets are backfilled as `NULL` because reliable historical timestamps do not exist; inventing timestamps from `createdAt` would corrupt audit reporting.
 3.  **Decision 3: Dedicated `IdempotencyKey` Table with SHA-256 Fingerprinting:**
-    *   *Rationale:* Storing idempotency records in a dedicated table scoped by `[route, ticketId, userId, key]` supports all mutation endpoints (actions, comments, advisory resolution) uniformly, enforces exact payload verification via SHA-256, and enables safe 24-hour TTL pruning without altering business models.
+    *   *Rationale:* Storing idempotency records in a dedicated table scoped by `[route, ticketId, userId, key]` supports all mutation endpoints uniformly, enforces exact payload verification via SHA-256, prevents duplicate Action Taken creation via mandatory header enforcement, and enables safe 24-hour TTL pruning without altering business models.
 4.  **Decision 4: Direct Foreign Key Relations with Dedicated Indexes:**
-    *   *Rationale:* Adding explicit indexes on `ticketId` and `performedById` guarantees high-speed timeline retrieval (`WHERE ticketId = ? ORDER BY actionDateTime ASC, id ASC`) and fast staff audit queries without full-table scans.
+    *   *Rationale:* Adding explicit indexes on `ticketId`, `performedById`, and `[actionTakenId, editedAt]` guarantees high-speed timeline retrieval (`WHERE ticketId = ? ORDER BY actionDateTime ASC, id ASC`) and fast audit queries without full-table scans.
+5.  **Decision 5: Append-Only `ActionTakenRevision` Audit History & Database-Level Immutability:**
+    *   *Rationale:* Originating from the repository owner's approved peer-review decision (not required by Handout Section 4.3), every successful edit of an Action Taken must be fully auditable for technical work accountability. Creating an immutable `ActionTakenRevision` record on every field-altering edit captures the authenticated editor (`editedById`), server timestamp (`editedAt`), and complete JSON snapshots of before and after states. Previous revisions cannot be updated, deleted, or truncated, and both parent relations enforce `onDelete: Restrict`. To guarantee that revision records cannot be rewritten, deleted, or wiped even via direct database mutations, PostgreSQL row and statement triggers reject any `UPDATE`, `DELETE`, or `TRUNCATE` at the database engine level, and `TRUNCATE` privileges are revoked from the application role. Pre-existing legacy actions receive no fabricated historical revisions.
 
 ### 7.3 Migration, Backfill & Safe Rollback Procedure
-*   **Data Preservation:** The forward migration (`ALTER TABLE "Ticket" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, ADD COLUMN "resolvedAt" TIMESTAMP(3); CREATE TABLE "ActionTaken" ...; CREATE TABLE "IdempotencyKey" ...;`) does not alter, drop, or rename existing columns in `RequesterUser`, `Ticket`, `Attachment`, `PublicComment`, or `InternalNote`.
+*   **Data Preservation:** The forward migration (`ALTER TABLE "Ticket" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, ADD COLUMN "resolvedAt" TIMESTAMP(3); CREATE TABLE "ActionTaken" ...; CREATE TABLE "ActionTakenRevision" ...; CREATE TABLE "IdempotencyKey" ...;`) does not alter, drop, or rename existing columns in `RequesterUser`, `Ticket`, `Attachment`, `PublicComment`, or `InternalNote`.
 *   **Backfill Strategy:**
     *   Existing tickets receive `updatedAt = createdAt`.
     *   Existing tickets already in `Resolved` or `Closed` status receive `resolvedAt = NULL`.
     *   Existing active tickets receive `resolvedAt = NULL`.
-    *   Existing tickets with zero actions behave naturally with `actionsTaken = []`. Historical resolved/closed tickets are not invalidated.
+    *   Existing tickets with zero actions behave naturally with `actionsTaken = []`.
+    *   Existing `ActionTaken` records initially have zero revisions in `ActionTakenRevision`. No fabricated historical revisions are generated for pre-migration actions; their first edit after migration appends their first revision.
+
+#### 7.3.1 Database-Level Append-Only Trigger Specification (Proposed Migration Requirement)
+To enforce true immutability beyond application-level route restrictions, the future database migration shall define a PostgreSQL trigger function, row-level trigger, statement-level truncate trigger, and privilege restrictions that reject any `UPDATE`, `DELETE`, or `TRUNCATE` statement executed against `"ActionTakenRevision"` while permitting `INSERT`:
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_action_taken_revision_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'ActionTakenRevision records are append-only and cannot be updated, deleted, or truncated.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_action_taken_revision_mutation
+BEFORE UPDATE OR DELETE ON "ActionTakenRevision"
+FOR EACH ROW
+EXECUTE FUNCTION prevent_action_taken_revision_mutation();
+
+CREATE TRIGGER trg_prevent_action_taken_revision_truncate
+BEFORE TRUNCATE ON "ActionTakenRevision"
+FOR EACH STATEMENT
+EXECUTE FUNCTION prevent_action_taken_revision_mutation();
+
+-- Revoke TRUNCATE privilege on ActionTakenRevision from the application database role
+REVOKE TRUNCATE ON TABLE "ActionTakenRevision" FROM toktickit;
+```
+
+*Note on Migration Stage:* This trigger, function, and privilege specification is a **proposed migration requirement at the documentation stage** and will be implemented as part of the future database migration.
+
+*Execution Semantics:*
+*   `INSERT` operations remain fully permitted (invoked during `PATCH /api/tickets/:id/actions/:actionId` within the CAS transaction).
+*   `UPDATE` operations raise an immediate SQL exception: `'ActionTakenRevision records are append-only and cannot be updated, deleted, or truncated.'`.
+*   `DELETE` operations raise the same exception.
+*   `TRUNCATE` operations raise the same exception via `trg_prevent_action_taken_revision_truncate` and are additionally barred by privilege revocation.
+
 *   **Safe Backup & Recovery Procedure for Rollback:**
-    *   *Important Caveat on Data Loss:* Rolling back the Lab 4 migration drops the `ActionTaken` and `IdempotencyKey` tables and drops `Ticket.updatedAt` and `Ticket.resolvedAt`. Therefore, any newly recorded Actions Taken in Lab 4 will be lost if a rollback is executed. Pre-Lab-4 data (Lab 1–3 records) will be preserved.
+    *   *Important Caveat on Data Loss:* Rolling back the Lab 4 migration drops the `ActionTaken`, `ActionTakenRevision`, and `IdempotencyKey` tables and drops `Ticket.updatedAt` and `Ticket.resolvedAt`. Therefore, any newly recorded Actions Taken and Revision History in Lab 4 will be lost if a rollback is executed. Pre-Lab-4 data (Lab 1–3 records) will be preserved.
     *   *Procedure:*
         1.  *Pre-Migration Backup:* Prior to applying migrations, take a complete logical dump:
             `pg_dump -U toktickit toktickit > backup_pre_lab4.sql`
         2.  *Pre-Rollback Backup:* If rolling back after Lab 4 has been in use, dump the Lab 4 tables separately:
-            `pg_dump -U toktickit -t "ActionTaken" -t "IdempotencyKey" toktickit > backup_lab4_data.sql`
-        3.  *Down Migration SQL:*
+            `pg_dump -U toktickit -t "ActionTaken" -t "ActionTakenRevision" -t "IdempotencyKey" toktickit > backup_lab4_data.sql`
+        3.  *Down Migration SQL (with Correct Trigger and Function Teardown Order):*
             ```sql
+            DROP TRIGGER IF EXISTS trg_prevent_action_taken_revision_truncate ON "ActionTakenRevision";
+            DROP TRIGGER IF EXISTS trg_prevent_action_taken_revision_mutation ON "ActionTakenRevision";
+            DROP FUNCTION IF EXISTS prevent_action_taken_revision_mutation();
+            DROP TABLE IF EXISTS "ActionTakenRevision" CASCADE;
             DROP TABLE IF EXISTS "ActionTaken" CASCADE;
             DROP TABLE IF EXISTS "IdempotencyKey" CASCADE;
             ALTER TABLE "Ticket" DROP COLUMN IF EXISTS "resolvedAt";
@@ -398,8 +474,9 @@ The seed script ([`server/prisma/seed.ts`](../../server/prisma/seed.ts)) is upda
 
 ### 8.1 Actions Taken Endpoints
 *   `GET /api/tickets/:id/actions`: Fetch list of Actions Taken for a ticket in chronological order (`actionDateTime ASC, id ASC`). (Permitted: Requester for own ticket, IT Staff, Admin).
-*   `POST /api/tickets/:id/actions`: Create a new Action Taken line. Supports `Idempotency-Key` header with SHA-256 fingerprinting. Auto-sets `performedById`. Refreshes parent Ticket `updatedAt`. (Permitted: IT Staff, Admin).
-*   `PATCH /api/tickets/:id/actions/:actionId`: Update an existing Action Taken line via atomic CAS. Requires `actionLastUpdatedAt`. Validates and updates editable fields (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`). Refreshes parent Ticket `updatedAt`. (Permitted: IT Staff, Admin).
+*   `POST /api/tickets/:id/actions`: Create a new Action Taken line. **Requires mandatory** `Idempotency-Key` header (<UUIDv4>) with SHA-256 fingerprinting (missing or malformed returns HTTP 400 Bad Request before any domain mutation: no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh). Auto-sets `performedById`. Refreshes parent Ticket `updatedAt`. (Permitted: IT Staff, Admin).
+*   `PATCH /api/tickets/:id/actions/:actionId`: Update an existing Action Taken line via atomic CAS. Requires `actionLastUpdatedAt`. Validates and updates editable fields (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`). Atomically creates an append-only `ActionTakenRevision` record capturing `beforeSnapshot` and `afterSnapshot` JSON. Refreshes parent Ticket `updatedAt`. (Permitted: IT Staff, Admin).
+*   `GET /api/tickets/:id/actions/:actionId/revisions`: Fetch append-only revision history for a specific Action Taken in chronological order (`editedAt ASC, id ASC`). Returns list of revisions with editor user info, timestamps, and before/after snapshots. Read-only. (Permitted: IT Staff, Admin; Requester receives `403 Forbidden` for own ticket, `404 Not Found` for unowned ticket).
 
 ### 8.2 Operational Dashboard Endpoints
 *   `GET /api/dashboard/requester`: Returns `{ metrics: { openTickets, waitingForRequester, inProgress, resolved, closed }, recentlyUpdatedTickets: [...], recentlyResolvedTickets: [...] }`. All resolved calculations apply 30-day boundary via `resolvedAt IS NOT NULL AND resolvedAt >= NOW() - 30 days`. (Permitted: Requester only).
@@ -407,22 +484,23 @@ The seed script ([`server/prisma/seed.ts`](../../server/prisma/seed.ts)) is upda
 *   `GET /api/dashboard/admin`: Returns Staff metrics augmented with `{ userStats: { totalUsers, activeRequesters, activeStaff, activeAdmins, inactiveUsers } }`. (Permitted: Admin only).
 
 ### 8.3 Ticket Status & Workflow Endpoints
-*   `PATCH /api/staff/tickets/:id/status`: Updates Ticket status and/or IT Priority via atomic CAS (`UPDATE ... WHERE id = :id AND updatedAt = :lastUpdatedAt`). Requires `lastUpdatedAt`. Populates `resolvedAt = NOW()` on `Resolved`, clears `resolvedAt = null` on `Reopened` (outgoing transitions retain already-null `resolvedAt`). Enforces 13-row transition matrix and Resolution Gate. (Permitted: IT Staff only; Administrators receive `403 Forbidden` per preserved Lab 3 baseline).
-*   `POST /api/tickets/:id/comments`: Supports `Idempotency-Key` header. Posting comment on `Waiting for Requester` ticket auto-transitions to `Open`. Posting comment on `Resolved` or `Closed` ticket auto-transitions to `Reopened` (resets `resolvedAt = null`). (Permitted: Requester for own tickets, IT Staff; Administrators receive `403 Forbidden`).
-*   `POST /api/tickets/:id/appears-resolved`: Advisory feedback from Requester. Supports `Idempotency-Key` header. Appends Public Comment. Permitted exclusively when status is `In Progress`. Does NOT change Ticket status. (Permitted: Requester only).
+*   `PATCH /api/staff/tickets/:id/status`: Updates Ticket status and/or IT Priority via atomic CAS (`UPDATE ... WHERE id = :id AND updatedAt = :lastUpdatedAt`). Requires `lastUpdatedAt`. Enforces exact source-target owner validation (owner required only for `New -> Open`, `Open -> In Progress`, and `Reopened -> In Progress`; other transitions succeed with `ownerId = null`). Populates `resolvedAt = NOW()` on `Resolved`, clears `resolvedAt = null` on `Reopened` (outgoing transitions retain already-null `resolvedAt`). Enforces 13-row transition matrix and Resolution Gate (`actionCount >= 1` mandatory; resolution comment strictly optional, creating PublicComment only if non-empty). (Permitted: IT Staff only; Administrators receive `403 Forbidden` per preserved Lab 3 baseline).
+*   `POST /api/tickets/:id/comments`: Supports optional `Idempotency-Key` header. Posting comment on `Waiting for Requester` ticket auto-transitions to `Open`. Posting comment on `Resolved` or `Closed` ticket auto-transitions to `Reopened` (resets `resolvedAt = null`). (Permitted: Requester for own tickets, IT Staff; Administrators receive `403 Forbidden`).
+*   `POST /api/tickets/:id/appears-resolved`: Advisory feedback from Requester. Supports optional `Idempotency-Key` header. Appends Public Comment. Permitted exclusively when status is `In Progress`. Does NOT change Ticket status. (Permitted: Requester only).
 
 ---
 
 ## 9. Acceptance Criteria
 
-*   **AC-01 [Action Taken Creation]:** Given an authenticated IT Staff user (or Administrator) and valid action data, when `POST /api/tickets/:id/actions` is called, the Action Taken is persisted with the authenticated user automatically recorded as `performedById`, and parent Ticket `updatedAt` is refreshed.
+*   **AC-01 [Action Taken Creation & Mandatory Idempotency]:** Given an authenticated IT Staff user (or Administrator) and valid action data, when `POST /api/tickets/:id/actions` is called with a valid `Idempotency-Key` header, the Action Taken is persisted with the authenticated user automatically recorded as `performedById`, and parent Ticket `updatedAt` is refreshed. If `Idempotency-Key` is missing or malformed, the backend rejects the request with HTTP 400 Bad Request before any domain mutation (no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh).
 *   **AC-02 [Action Taken - Follow-up Validation]:** Given an Action Taken creation or update request with `followUpRequired = true` and an empty `followUpNote`, the backend rejects the request with HTTP 400 Bad Request. When `followUpRequired = false`, `followUpNote` must be null.
 *   **AC-03 [Action Taken - Multi-Staff Collaboration]:** Given a Ticket assigned to Staff A, when Staff B logs an Action Taken on that Ticket, the action is successfully saved with Staff B as `performedById` and the Ticket's `ownerId` remains Staff A.
 *   **AC-04 [Action Taken - Requester Forbidden from Mutation]:** Given an authenticated Requester, when attempting to create or update an Action Taken, the backend rejects the request with HTTP 403 Forbidden.
 *   **AC-05 [Action Taken - Requester Read Ownership & Ordering]:** Given an authenticated Requester, when fetching Actions Taken on a Ticket they own, the list is returned in chronological order (HTTP 200). When attempting to fetch Actions Taken on a Ticket owned by another Requester, the backend returns HTTP 404 Not Found (non-enumeration).
-*   **AC-06 [Action Taken - Full Update Support via CAS]:** Given an authorized IT Staff member and an existing Action Taken, when updating `actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, or `attachmentNotes` with matching `actionLastUpdatedAt`, the action is conditionally updated (HTTP 200), the immutable original `performedById` is preserved, and parent Ticket `updatedAt` is refreshed.
-*   **AC-07 [Resolution Gate Enforcement]:** Given a Ticket in `In Progress` with zero Actions Taken, when IT Staff attempts to transition the status to `Resolved`, the backend rejects the change with HTTP 400 Bad Request.
-*   **AC-08 [Resolution Gate Success & `resolvedAt`]:** Given a Ticket in `In Progress` with at least one Action Taken, when IT Staff submits a transition to `Resolved` with a non-empty resolution comment and valid `lastUpdatedAt`, the Ticket status transitions to `Resolved`, `resolvedAt` is set to current timestamp, and a Public Comment is created atomically.
+*   **AC-06 [Action Taken - Full Update Support via CAS]:** Given an authorized IT Staff member and an existing Action Taken, when updating `actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, or `attachmentNotes` with matching `actionLastUpdatedAt`, the action is conditionally updated (HTTP 200), the immutable original `performedById` is preserved, an append-only revision record is inserted, and parent Ticket `updatedAt` is refreshed.
+*   **AC-06b [Action Taken - Append-Only Revision History]:** Given an authorized IT Staff member or Administrator updating an Action Taken line via CAS, an `ActionTakenRevision` record is atomically created in the same transaction capturing the exact `beforeSnapshot` and `afterSnapshot` JSON of all 6 editable fields, the editor's `editedById`, and server-generated `editedAt`. Historical revisions can be fetched via `GET /api/tickets/:id/actions/:actionId/revisions` (ordered `editedAt ASC, id ASC`). Requesters receive HTTP 403 Forbidden on own tickets (HTTP 404 on unowned). Revisions are append-only, immutable, and protected by `onDelete: Restrict`.
+*   **AC-07 [Resolution Gate Enforcement - Zero Actions]:** Given a Ticket in `In Progress` with zero Actions Taken, when IT Staff attempts to transition the status to `Resolved`, the backend rejects the change with HTTP 400 Bad Request (`"At least one action taken must be recorded before resolving the ticket."`).
+*   **AC-08 [Resolution Gate Success & Optional Resolution Comment]:** Given a Ticket in `In Progress` with at least one Action Taken (`actionCount >= 1`), when IT Staff submits a transition to `Resolved` with valid `lastUpdatedAt`, the Ticket status transitions to `Resolved` and `resolvedAt` is set to current timestamp. If a non-empty resolution comment is provided, a Public Comment is created atomically. If the resolution comment is empty or omitted, the transition succeeds without creating an empty comment and without blocking resolution.
 *   **AC-09 [Comment-Driven Auto-Transition - Waiting for Requester]:** Given a Ticket in `Waiting for Requester`, when the owning Requester posts a Public Comment, the Ticket status automatically transitions to `Open` atomically.
 *   **AC-10 [Comment-Driven Auto-Transition - Resolved/Closed]:** Given a Ticket in `Resolved` or `Closed`, when the owning Requester posts a Public Comment, the Ticket status automatically transitions to `Reopened` and `resolvedAt` is cleared to `null` atomically.
 *   **AC-11 [Advisory Appears Resolved]:** Given a Ticket in `In Progress`, when the owning Requester triggers "Appears Resolved", a standardized Public Comment is created, and the Ticket status remains `In Progress`.
@@ -430,7 +508,7 @@ The seed script ([`server/prisma/seed.ts`](../../server/prisma/seed.ts)) is upda
 *   **AC-13 [Atomic CAS Concurrency - Ticket Status Collision]:** Given a Ticket modified by another session, when a client submits a status transition where the conditional update affects 0 rows due to an outdated `lastUpdatedAt` timestamp, the backend rejects the request with HTTP 409 Conflict.
 *   **AC-14 [Atomic CAS Concurrency - Action Taken Collision]:** Given an Action Taken modified by another session, when a client submits an edit where the conditional update affects 0 rows due to an outdated `actionLastUpdatedAt`, the backend rejects the request with HTTP 409 Conflict.
 *   **AC-15 [Optimistic Concurrency - Missing Tokens]:** Given a Ticket status or Action Taken update request where `lastUpdatedAt` or `actionLastUpdatedAt` is omitted, the backend rejects the request with HTTP 400 Bad Request.
-*   **AC-16 [Idempotency-Key Architecture & Concurrent Replay]:** Given a mutation request re-sent with an identical `Idempotency-Key` and matching SHA-256 payload fingerprint (whether sequential or arriving concurrently and unblocking via Two-Phase in-transaction reservation), the backend safely replays the previously created record with HTTP 200/201 and header `Idempotency-Replayed: true` without failing Ticket CAS. Reusing the same key with a different payload returns HTTP 409 Conflict. Separate legitimate submissions with distinct keys both persist.
+*   **AC-16 [Idempotency Policy & Concurrent Replay]:** `Idempotency-Key` header (<UUIDv4>) is **mandatory** on `POST /api/tickets/:id/actions` (missing or malformed returns HTTP 400 Bad Request before any domain mutation: no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh). It is **optional** on `POST /api/tickets/:id/comments` and `POST /api/tickets/:id/appears-resolved`. Given a mutation request re-sent with an identical `Idempotency-Key` and matching SHA-256 payload fingerprint (whether sequential or arriving concurrently and unblocking via Two-Phase in-transaction reservation), the backend safely replays the previously created record with HTTP 200/201 and header `Idempotency-Replayed: true` without failing Ticket CAS. Reusing the same key with a different payload returns HTTP 409 Conflict. Separate legitimate submissions with distinct keys both persist.
 *   **AC-17 [Requester Dashboard - Data Isolation & Waiting Metric]:** Given an authenticated Requester, `GET /api/dashboard/requester` returns metrics (including My Open Tickets, Waiting for Requester, In Progress, Resolved within 30 days, Closed) and recent lists belonging strictly to that Requester.
 *   **AC-18 [Requester Dashboard - 30-Day Boundary via `resolvedAt` & Legacy Policy]:** The Recently Resolved metric and list include only tickets where `status == 'Resolved'` and `resolvedAt IS NOT NULL AND resolvedAt >= NOW() - 30 days`, sorted strictly by `resolvedAt DESC`. Subsequent edits to Actions Taken (which refresh `updatedAt`) do not alter `resolvedAt`. Legacy tickets with `resolvedAt = NULL` are excluded.
 *   **AC-19 [Requester Dashboard - Open Tickets Drill-Down]:** Clicking the "My Open Tickets" metric card navigates to `/tickets?view=open`, which displays active open tickets and strictly excludes Closed and Cancelled tickets.
@@ -438,26 +516,30 @@ The seed script ([`server/prisma/seed.ts`](../../server/prisma/seed.ts)) is upda
 *   **AC-21 [IT Staff Dashboard - Zero/Empty State]:** When a staff member has zero assigned tickets or the queue is empty, dashboard endpoints return 0 for all metrics and empty lists `[]`, rendering cleanly in the UI.
 *   **AC-22 [Administrator Dashboard - User Statistics]:** Given an authenticated Administrator, `GET /api/dashboard/admin` returns IT Staff operational metrics plus exact account counts for all five user metrics: Total Users, Active Requesters, Active Staff, Active Admins, and Inactive Accounts.
 *   **AC-23 [Dashboard UI States]:** Both dashboards render distinct UI presentations for Loading (skeletons), Empty (zero counts), Forbidden (access denied), and Safe Failure (error alert with retry button).
-*   **AC-24 [Data Retention & Legacy Ticket Preservation]:** Existing Lab 1–3 data remains intact after migration. `ActionTaken` references `Ticket` with `onDelete: Restrict`, protecting audit logs from cascade deletion. Existing legacy tickets receive `resolvedAt = NULL`.
+*   **AC-24 [Data Retention & Legacy Ticket Preservation]:** Existing Lab 1–3 data remains intact after migration. `ActionTaken` and `ActionTakenRevision` reference `Ticket` and `ActionTaken` with `onDelete: Restrict`, protecting audit logs and revision trails from cascade deletion. Existing legacy tickets receive `resolvedAt = NULL`.
 *   **AC-25 [Responsive & Accessible UI]:** Dashboards and Actions Taken UI render without horizontal clipping, blanket `overflow-x: hidden`, keyboard traps, or missing labels across Desktop (1200px), Tablet (800px), and Mobile (400px) viewports, supporting Tab, Enter, Space, and Escape keyboard navigation.
 
 ---
 
 ## 10. Product Definition of Done (DoD)
 1.  **Specification & Contract Complete:** `specification.md`, `api-spec.md`, `ui-spec.md`, and `tests.md` are reviewed, consistent, and checked into version control.
-2.  **Database Migration & Seed:** Prisma migration cleanly applies the `ActionTaken` model (with `onDelete: Restrict`), `IdempotencyKey` model, `Ticket.updatedAt`, and `Ticket.resolvedAt` without altering or losing existing Lab 1–3 data. Seed script is idempotent and provides comprehensive test scenarios.
-3.  **Actions Taken Implemented:** Full backend CRUD (with automated actor, CAS conditional updates, deterministic ordering, and parent `updatedAt` refresh) and frontend UI (list, create, edit, requester read-only) fully operational.
-4.  **Workflow & Resolution Gate Enforced:** Complete 13-row transition matrix enforced server-side. Outgoing transitions from `Reopened` to `In Progress`, `Open`, and `Waiting for Requester` operational (retaining already-null `resolvedAt` value). Resolution Gate blocks `Resolved` transitions without Actions Taken. Populates `resolvedAt = NOW()` on `Resolved`, clears `resolvedAt = null` on `Reopened`. Comment-driven auto-transitions operational. "Appears Resolved" remains strictly advisory.
-5.  **Atomic CAS Concurrency & Idempotency Active:** Stale update attempts to Ticket status or Action Taken return HTTP 409 Conflict via atomic conditional update row count verification. Missing tokens return HTTP 400. `Idempotency-Key` headers safely replay responses with SHA-256 payload verification.
+2.  **Database Migration & Seed:** Prisma migration cleanly applies the `ActionTaken` model (with `onDelete: Restrict`), `ActionTakenRevision` model (with `onDelete: Restrict`), `IdempotencyKey` model, `Ticket.updatedAt`, and `Ticket.resolvedAt` without altering or losing existing Lab 1–3 data. Seed script is idempotent and provides comprehensive test scenarios.
+3.  **Actions Taken Implemented:** Full backend CRUD (with automated actor, CAS conditional updates, deterministic ordering, parent `updatedAt` refresh, and append-only revision history recording) and frontend UI (list, create, edit, requester read-only, and revision history modal) fully operational.
+4.  **Workflow & Resolution Gate Enforced:** Complete 13-row transition matrix enforced server-side. Exact source-target owner validation active (owner required only for `New -> Open`, `Open -> In Progress`, and `Reopened -> In Progress`; other transitions permit `ownerId = null`). Outgoing transitions from `Reopened` to `In Progress`, `Open`, and `Waiting for Requester` operational (retaining already-null `resolvedAt` value). Resolution Gate enforces mandatory `actionCount >= 1` (resolution comment is strictly optional, creating PublicComment only if non-empty). Populates `resolvedAt = NOW()` on `Resolved`, clears `resolvedAt = null` on `Reopened`. Comment-driven auto-transitions operational. "Appears Resolved" remains strictly advisory.
+5.  **Atomic CAS Concurrency & Idempotency Active:** Stale update attempts to Ticket status or Action Taken return HTTP 409 Conflict via atomic conditional update row count verification. Missing tokens return HTTP 400. Mandatory `Idempotency-Key` enforced on `POST /api/tickets/:id/actions` (missing or malformed returns HTTP 400 Bad Request before any domain mutation: no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh). Optional `Idempotency-Key` supported on `/comments` and `/appears-resolved`. All endpoints safely replay responses with SHA-256 payload verification.
 6.  **Role Dashboards Functional:** Authoritative backend calculation for Requester, IT Staff, and Administrator dashboards, with accurate metrics (including Unassigned, Waiting for Requester, and `resolvedAt` 30-day boundary), recent ticket lists, working drill-down navigation, and 4 UI states.
-7.  **Zen Green UI & Accessibility:** Application shell, dashboards, and Actions Taken adhere to Zen Green styling, pass responsive checks on 3 viewports without blanket `overflow-x: hidden`, and have zero horizontal overflow and full keyboard accessibility.
-8.  **Automated Test Suite Passing:** All planned backend unit/integration tests, frontend component tests, and Playwright E2E tests pass reliably.
+7.  **Zen Green UI & Accessibility:** Application shell, dashboards, Actions Taken UI, and Revision History modal adhere to Zen Green styling, pass responsive checks on 3 viewports without blanket `overflow-x: hidden`, and have zero horizontal overflow and full keyboard accessibility.
+8.  **Automated Test Suite Passing:** All 106 planned backend unit/integration tests, frontend component tests, and Playwright E2E tests pass reliably.
 9.  **Complete Regression Verified:** All Lab 1–3 capabilities (Auth, RBAC, Queue, Attachments, Comments, Notes, User Admin) pass regression testing.
 
 ---
 
 ## 11. Assumptions and Decisions
 *   **Decision - Complete Outgoing Transitions from Reopened:** Reopened tickets return to active service via `Reopened` -> `In Progress` (staff resumes work), `Reopened` -> `Open` (reset to queue), or `Reopened` -> `Waiting for Requester` (more info needed). Direct re-closing without work is prohibited.
+*   **Decision - Exact Source-Target Owner Validation:** Owner (`ownerId != null`) is strictly required only on transitions introducing an active working commitment: `New -> Open`, `Open -> In Progress`, and `Reopened -> In Progress`. Other transitions (`Waiting for Requester -> Open`, `Waiting for Requester -> In Progress`, `Reopened -> Open`, `Reopened -> Waiting for Requester`) succeed with `ownerId = null` to allow triaging and queuing unassigned tickets. The validation error explicitly identifies the transition: `"Ticket must be assigned to an owner before transitioning from '{source}' to '{target}'."`
+*   **Decision - Resolution Gate Action Count as Sole Mandatory Condition:** Handout Section 8.3 requires Actions Taken to prove technical work completed. The resolution comment is strictly optional: if provided and non-empty, a `PublicComment` is created atomically; if blank or omitted, the status change to `Resolved` succeeds without creating empty comment rows or blocking IT Staff.
+*   **Decision - Append-Only Action Taken Revision History:** Originating from the repository owner's approved peer-review decision (not required by Handout Section 4.3), updates to Action Taken records append an immutable `ActionTakenRevision` containing `beforeSnapshot` and `afterSnapshot` JSON, editor ID, and server timestamp within the CAS transaction to satisfy technical work auditing and accountability requirements without violating data integrity. Revisions cannot be updated, deleted, or truncated (`onDelete: Restrict`). Requesters are denied access (403 on own ticket, 404 on unowned ticket) to prevent exposure of internal edit trails. Pre-migration actions begin with zero revisions (no fabricated historical records).
+*   **Decision - Mandatory Idempotency-Key for Action Taken Creation:** Unlike comments and advisory signals which have natural user text variations, Action Taken creation represents formal work logging prone to accidental double-submission during form submission. `Idempotency-Key: <UUIDv4>` is mandatory on `POST /api/tickets/:id/actions` (returning HTTP 400 if omitted or malformed) to guarantee deduplication before any domain mutation (no ActionTaken insert, no IdempotencyKey reservation, and no parent Ticket timestamp refresh) occurs. Header remains optional on `/comments` and `/appears-resolved`. Actions Taken serve strictly for technical work auditability, troubleshooting history, and staff accountability—not for billing, timesheet logging, or labor-cost accounting.
 *   **Decision - Legacy Resolution Timestamp Policy:** Because reliable historical resolution dates do not exist for legacy Lab 1–3 tickets, they are backfilled with `resolvedAt = NULL` rather than fabricating timestamps from `createdAt`. Queries for 30-day recent resolutions require `resolvedAt IS NOT NULL AND resolvedAt >= NOW() - 30 days`, cleanly excluding unverified legacy records.
 *   **Decision - Dedicated `IdempotencyKey` Table:** Scoped compound uniqueness `[route, ticketId, userId, key]` and SHA-256 payload fingerprinting cleanly protect `/actions`, `/comments`, and `/appears-resolved` without corrupting business entities.
 *   **Decision - Atomic CAS Conditional Updates:** Concurrency control is implemented via database-level conditional mutations (`UPDATE ... WHERE id = :id AND updatedAt = :lastUpdatedAt`), checking affected row counts rather than relying on application-level read-then-write transactions.

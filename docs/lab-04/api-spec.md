@@ -13,13 +13,14 @@ Key architectural rules:
 *   **Atomic Concurrency Control (CAS & State-Conditional Updates):** A database transaction alone is not sufficient concurrency control under `READ COMMITTED` isolation. Mutation endpoints enforce atomic conditional updates directly in the database:
     *   *Timestamp CAS Mutations:* `PATCH /api/staff/tickets/:id/status` and `PATCH /api/tickets/:id/actions/:actionId` require timestamp tokens (`lastUpdatedAt`, `actionLastUpdatedAt`) and execute `UPDATE ... WHERE id = :id AND updatedAt = :token`. If 0 rows are affected, the API checks existence and ownership to distinguish missing or inaccessible resources (`404 Not Found`) from concurrent collisions (`409 Conflict`).
     *   *Comment & Advisory State-Conditional Mutations:* `POST /api/tickets/:id/comments` and `POST /api/tickets/:id/appears-resolved` require the Ticket's expected `lastUpdatedAt` token in the payload and execute atomic conditional updates matching both the expected status and timestamp (`UPDATE "Ticket" ... WHERE id = :ticketId AND status = :expectedStatus AND updatedAt = :lastUpdatedAt`) within the transaction. This prevents concurrent Staff status updates, concurrent non-status updates (such as owner or priority changes), and ABA status changes from being silently overwritten. If 0 rows are affected, the API checks existence and ownership to distinguish missing resources (`404 Not Found`) from concurrent collisions (`409 Conflict`), rolling back the entire transaction.
-*   **Dedicated Idempotency-Key Architecture & CAS Interaction:** In-scope POST endpoints (`/actions`, `/comments`, `/appears-resolved`) support `Idempotency-Key: <UUIDv4>`. The header is **optional** on all three endpoints (clients are encouraged to supply it; if omitted, requests execute normally without deduplication).
+*   **True Append-Only Revision History & Database-Level Immutability:** Originating from the repository owner's approved peer-review decision (not required by Handout Section 4.3), `ActionTakenRevision` records are strictly immutable. Beyond having no operational edit or delete endpoints, PostgreSQL triggers (`trg_prevent_action_taken_revision_mutation`, `trg_prevent_action_taken_revision_truncate`) and role privilege revocations reject any `UPDATE`, `DELETE`, or `TRUNCATE` at the database engine level (proposed migration requirement at documentation stage).
+*   **Dedicated Idempotency-Key Architecture & CAS Interaction:** In-scope POST endpoints (`/actions`, `/comments`, `/appears-resolved`) support `Idempotency-Key: <UUIDv4>`. The header is **mandatory** on `POST /api/tickets/:id/actions` (missing or malformed returns HTTP 400 Bad Request before any domain mutation: no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh). It remains **optional** on `POST /api/tickets/:id/comments` and `POST /api/tickets/:id/appears-resolved` (clients are encouraged to supply it; if omitted, requests execute normally without deduplication).
     *   *Scope & Hashing:* Scoped strictly to compound key `[route, ticketId, userId, key]`, storing a SHA-256 fingerprint of the canonical request payload.
     *   *Concurrency Race & False 409 Prevention:* Under PostgreSQL default Read Committed isolation, if two concurrent identical requests arrive with the same `Idempotency-Key` and expected `lastUpdatedAt`, both pass the pre-transaction lookup before either commits. If the transaction were to evaluate Ticket CAS before inserting into `IdempotencyKey`, Request 1's Ticket CAS would update `Ticket.updatedAt`. When Request 2's transaction unblocks and evaluates Ticket CAS, the conditional update condition matches 0 rows because `updatedAt` changed. Request 2 would throw a false `409 Conflict` and abort *before* reaching `IdempotencyKey`. Request 2 would never receive a `P2002` error, thereby failing to replay Request 1's response.
     *   *Two-Phase In-Transaction Reservation Pattern:* To guarantee reliable replay without CAS false 409s across all endpoints combining idempotency and Ticket updates:
-        1.  **Phase 1 (In-Transaction Reservation Claim):** Immediately upon entering `prisma.$transaction`, if `idempotencyKey` is present, the transaction claims the slot FIRST:
+        1.  **Phase 1 (In-Transaction Reservation Claim):** The reservation must be claimed before any state-changing domain operation or CAS update. Read-only existence and ownership checks may occur before reservation creation. If `idempotencyKey` is present (mandatory on `/actions`, optional on `/comments` and `/appears-resolved`), the transaction claims the slot:
             `tx.idempotencyKey.create({ data: { key, route, ticketId, userId, requestHash, statusCode: null, responseBody: null, expiresAt } })`
-            Under PostgreSQL, this acquires an exclusive tuple lock on the compound unique index `[route, ticketId, userId, key]`. If Request 2 arrives concurrently with the same compound key, Request 2's `tx.idempotencyKey.create` immediately **blocks** at the database level on this unique index tuple lock *before* evaluating Ticket CAS. Request 2 does not evaluate Ticket CAS while Request 1 is executing.
+            Under PostgreSQL, this acquires an exclusive tuple lock on the compound unique index `[route, ticketId, userId, key]`. If Request 2 arrives concurrently with the same compound key, Request 2's `tx.idempotencyKey.create` immediately **blocks** at the database level on this unique index tuple lock *before* evaluating Ticket CAS or performing any domain mutations. Request 2 does not evaluate Ticket CAS while Request 1 is executing.
         2.  **Phase 2 (CAS & Domain Execution):** Request 1 executes the Ticket CAS and domain logic (creating ActionTaken or PublicComment and refreshing `Ticket.updatedAt`). Upon success, Request 1 finalizes the reservation:
             `tx.idempotencyKey.update({ where: { id: reservation.id }, data: { statusCode: 201, responseBody: JSON.stringify(result) } })`
             Request 1 commits its transaction.
@@ -31,6 +32,117 @@ Key architectural rules:
     *   *Expired-Key Handling:* Keys expire after 24 hours (`expiresAt <= NOW()`). Before inserting a new record, the server prunes any expired scoped record (`DELETE WHERE id = :existingId`), ensuring the database unique constraint does not block legitimate key reuse after 24 hours.
 *   **Atomic Transaction Boundaries:** State updates and side effects (status transition + comment/note creation + parent `updatedAt` refresh + idempotency reservation and finalization) must execute within a single atomic database transaction (`prisma.$transaction`). Any failed condition rolls back the entire operation, leaving no orphan records.
 *   **Safe Error Feedback:** Server-side failures return safe, generic error objects (`{ error: "Internal server error" }`) without leaking stack traces or database schema details.
+
+### 1.1 Shared Strict ISO Timestamp Parser & Validation Conventions
+All API mutation endpoints handling client-supplied timestamps enforce a single shared, strict ISO 8601 timestamp parser. JavaScript's native `Date.parse()` alone is insufficient because it permits non-standard date formats (e.g., month names, two-digit years, omitted time components).
+
+*   **Accepted Format:** `YYYY-MM-DDTHH:mm:ss[.S|.SS|.SSS](Z|±HH:mm)`
+*   **Accepted Syntax Rules:**
+    *   Uppercase `T` separating calendar date and wall-clock time.
+    *   Four-digit year from `0001` through `9999`.
+    *   Mandatory seconds (`:ss`).
+    *   Optional fractional seconds of 1 to 3 digits (`.S`, `.SS`, `.SSS`).
+    *   Mandatory timezone designator: uppercase `Z` (for UTC) or explicit timezone offset `±HH:mm` (e.g., `+07:00`, `-05:00`).
+*   **Valid Input Examples:**
+    *   `2026-11-02T08:30:00Z`
+    *   `2026-11-02T08:30:00.000Z`
+    *   `2026-11-02T15:30:00+07:00`
+    *   `2026-11-02T01:30:00-07:00`
+*   **Validation Steps:**
+    1. The input value must be of type string.
+    2. The string must match the strict ISO regex.
+    3. Year (`1..9999`), month (`1..12`), day (`1..31`), hour (`0..23`), minute (`0..59`), second (`0..59`), and timezone offset hours (`0..23`) and minutes (`0..59`) must be within valid mathematical ranges.
+    4. The calendar date must be physically real, including strict leap-year calculation for February (29 days on leap years, 28 days otherwise). Invalid calendar dates (such as `2026-02-30T08:30:00Z` or `2026-04-31T12:00:00Z`) are strictly rejected with HTTP `400 Bad Request` rather than being coerced or normalized into subsequent dates.
+    5. `Date.parse(value)` must yield a finite integer timestamp.
+    6. When valid, the parsed value is instantiated as a JavaScript `Date` representing the exact UTC instant. Offsets are mathematically applied to represent the precise epoch millisecond point in time.
+*   **Shared Implementation Pattern:**
+    ```typescript
+    const parseStrictIsoTimestamp = (value: unknown): Date | null => {
+      if (typeof value !== 'string') {
+        return null;
+      }
+
+      const match =
+        /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+
+      if (!match) {
+        return null;
+      }
+
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const hour = Number(match[4]);
+      const minute = Number(match[5]);
+      const second = Number(match[6]);
+      const timezone = match[7];
+
+      if (
+        year < 1 ||
+        year > 9999 ||
+        month < 1 ||
+        month > 12 ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59 ||
+        second < 0 ||
+        second > 59
+      ) {
+        return null;
+      }
+
+      const isLeapYear =
+        year % 4 === 0 &&
+        (year % 100 !== 0 || year % 400 === 0);
+
+      const daysPerMonth = [
+        31,
+        isLeapYear ? 29 : 28,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31
+      ];
+
+      if (day < 1 || day > daysPerMonth[month - 1]) {
+        return null;
+      }
+
+      if (timezone !== 'Z') {
+        const offset = /^([+-])(\d{2}):(\d{2})$/.exec(timezone);
+
+        if (
+          !offset ||
+          Number(offset[2]) > 23 ||
+          Number(offset[3]) > 59
+        ) {
+          return null;
+        }
+      }
+
+      const milliseconds = Date.parse(value);
+
+      if (!Number.isFinite(milliseconds)) {
+        return null;
+      }
+
+      return new Date(milliseconds);
+    };
+    ```
+*   **Universal Endpoint Scope:** This parser is the authoritative timestamp validator across:
+    *   `actionDateTime` in `POST /api/tickets/:id/actions` (optional; defaults to current time if omitted; cannot be in the future).
+    *   `actionDateTime` in `PATCH /api/tickets/:id/actions/:actionId` (optional; cannot be in the future).
+    *   `actionLastUpdatedAt` in `PATCH /api/tickets/:id/actions/:actionId` (mandatory CAS token).
+    *   `lastUpdatedAt` in `PATCH /api/staff/tickets/:id/status` (mandatory CAS token).
+    *   `lastUpdatedAt` in `POST /api/tickets/:id/comments` (mandatory CAS token).
+    *   `lastUpdatedAt` in `POST /api/tickets/:id/appears-resolved` (mandatory CAS token).
 
 ---
 
@@ -80,7 +192,7 @@ Key architectural rules:
 *   **Permitted Roles:** `IT Staff`, `Administrator`. (Requesters denied with `403 Forbidden`).
 *   **Request Headers:**
     *   `Content-Type: application/json`
-    *   `Idempotency-Key`: UUIDv4 string (**optional** on all POST endpoints; if omitted, request executes normally without deduplication).
+    *   `Idempotency-Key`: UUIDv4 string (**mandatory**; missing or malformed header returns HTTP 400 Bad Request before any domain mutation: no ActionTaken insert, no IdempotencyKey reservation, and no Ticket timestamp refresh).
 *   **Request Shape:**
     ```json
     {
@@ -93,16 +205,21 @@ Key architectural rules:
     }
     ```
 *   **Validation Rules:**
-    *   `actionDescription`: String, required, trimmed, min 1 char, max 2000 chars.
-    *   `result`: String, required, trimmed, min 1 char, max 2000 chars.
-    *   `actionDateTime`: ISO 8601 string, optional (defaults to `new Date()` if omitted); cannot be in the future.
-    *   `followUpRequired`: Boolean, required.
-    *   `followUpNote`: String, **mandatory** (1–2000 non-whitespace chars) if `followUpRequired === true`. Must be submitted as `null` if `followUpRequired === false`.
-    *   `attachmentNotes`: String, optional, max 500 chars. (Validation returns `400 Bad Request` if length > 500).
-    *   `performedById`: Server-managed and strictly immutable. Extracted automatically from `req.user.id`. Any value sent in the body is stripped and ignored by the server, and excluded from canonicalization.
+    *   `actionDescription`: String, required. Must contain 1–2000 non-whitespace characters after trimming. Supplying empty string, whitespace-only, non-string, or text exceeding 2000 characters returns `400 Bad Request`.
+    *   `result`: String, required. Must contain 1–2000 non-whitespace characters after trimming. Supplying empty string, whitespace-only, non-string, or text exceeding 2000 characters returns `400 Bad Request`.
+    *   `actionDateTime`: ISO 8601 string, optional. If omitted, defaults to the server's current timestamp (`new Date()`). If supplied, it must pass `parseStrictIsoTimestamp` and cannot be in the future. Supplying an invalid format, unparseable timestamp, or future date returns `400 Bad Request`.
+    *   `followUpRequired`: Boolean, required. Must be an actual boolean primitive (`typeof followUpRequired === 'boolean'`). Supplying non-boolean types (strings, numbers, objects) or omitting returns `400 Bad Request` (no `Boolean(...)` coercion permitted).
+    *   `followUpNote`: Conditionally validated based on `followUpRequired`:
+        *   When `followUpRequired === true`: String, mandatory. Must contain 1–2000 non-whitespace characters after trimming. Supplying missing, null, empty whitespace, non-string, or text exceeding 2000 characters returns `400 Bad Request`.
+        *   When `followUpRequired === false`: Must be `null` according to the documented contract. Supplying a non-null string, empty string, or non-null value returns `400 Bad Request`.
+    *   `attachmentNotes`: String, optional. May be omitted, null, or a string. If string, it is trimmed and blank/whitespace-only values are normalized to `null`. If trimmed length exceeds 500 characters, returns `400 Bad Request`.
+    *   `performedById`: Server-managed and strictly immutable. Extracted automatically from `req.user.id`. Any value sent in the body is stripped and ignored by the server, and excluded from canonicalization and request hashing.
+    *   *Validation Precedence:* All request validations execute **strictly before** any `IdempotencyKey` pre-lookup, expired-key cleanup, reservation creation, or domain mutation. Invalid input is rejected with HTTP `400 Bad Request` with no state modification.
 *   **Idempotency & Replay Handling:**
-    *   `Idempotency-Key` is strictly optional. If provided:
+    *   `Idempotency-Key` is **mandatory**.
+        *   Verify header presence: if missing, return `400 Bad Request` (`{ error: "Idempotency-Key header is required. Must be UUIDv4." }`).
         *   Verify header format is valid UUIDv4 (`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`). If invalid, return `400 Bad Request` (`{ error: "Invalid Idempotency-Key header format. Must be UUIDv4." }`).
+        *   Validation occurs strictly before any domain mutation (no ActionTaken insert, no IdempotencyKey reservation, and no parent Ticket timestamp refresh).
         *   Canonicalize payload: strip ignored fields (`performedById`), trim string fields (`actionDescription`, `result`, `followUpNote`, `attachmentNotes`), normalize timestamps, and recursively sort object keys alphabetically.
         *   Compute `requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalize(req.body))).digest('hex')`.
         *   Pre-lookup `IdempotencyKey` where `[route: "POST /api/tickets/:id/actions", ticketId, userId, key]`:
@@ -115,53 +232,110 @@ Key architectural rules:
 *   **Atomic Transaction Boundary & Implementation Pattern:**
     ```typescript
     try {
-      let requestHash = '';
-      if (idempotencyKey) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
-          return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
-        }
-        // Canonicalize payload: strip server-managed performedById, trim strings, sort keys
-        const canonicalPayload = {
-          actionDateTime: actionDateTime ? new Date(actionDateTime).toISOString() : undefined,
-          actionDescription: actionDescription?.trim(),
-          result: result?.trim(),
-          followUpRequired: Boolean(followUpRequired),
-          followUpNote: followUpRequired ? followUpNote?.trim() : null,
-          attachmentNotes: attachmentNotes ? attachmentNotes.trim() : null
-        };
-        requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+      // 1. Mandatory UUIDv4 Idempotency-Key header validation
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: "Idempotency-Key header is required. Must be UUIDv4." });
+      }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+        return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
+      }
 
-        const existingKey = await prisma.idempotencyKey.findUnique({
-          where: {
-            route_ticketId_userId_key: {
-              route: "POST /api/tickets/:id/actions",
-              ticketId,
-              userId: req.user.id,
-              key: idempotencyKey
-            }
+      // 2. Validate all request fields upfront before any database pre-lookup, pruning, or reservation
+      if (typeof actionDescription !== 'string' || actionDescription.trim().length < 1 || actionDescription.trim().length > 2000) {
+        return res.status(400).json({ error: "actionDescription is required and must be 1-2000 characters after trimming." });
+      }
+      const normalizedActionDescription = actionDescription.trim();
+
+      if (typeof result !== 'string' || result.trim().length < 1 || result.trim().length > 2000) {
+        return res.status(400).json({ error: "result is required and must be 1-2000 characters after trimming." });
+      }
+      const normalizedResult = result.trim();
+
+      let effectiveActionDateTime: Date;
+      if (actionDateTime !== undefined && actionDateTime !== null) {
+        const parsed = parseStrictIsoTimestamp(actionDateTime);
+        if (!parsed) {
+          return res.status(400).json({ error: "actionDateTime must be a valid strict ISO 8601 timestamp." });
+        }
+        if (parsed > new Date()) {
+          return res.status(400).json({ error: "actionDateTime cannot be in the future." });
+        }
+        effectiveActionDateTime = parsed;
+      } else {
+        effectiveActionDateTime = new Date();
+      }
+
+      if (typeof followUpRequired !== 'boolean') {
+        return res.status(400).json({ error: "followUpRequired must be an actual boolean." });
+      }
+
+      let normalizedFollowUpNote: string | null = null;
+      if (followUpRequired === true) {
+        if (typeof followUpNote !== 'string' || followUpNote.trim().length < 1 || followUpNote.trim().length > 2000) {
+          return res.status(400).json({ error: "followUpNote is required (1-2000 characters) when followUpRequired is true." });
+        }
+        normalizedFollowUpNote = followUpNote.trim();
+      } else {
+        if (followUpNote !== null && followUpNote !== undefined) {
+          return res.status(400).json({ error: "followUpNote must be null when followUpRequired is false." });
+        }
+        normalizedFollowUpNote = null;
+      }
+
+      let normalizedAttachmentNotes: string | null = null;
+      if (attachmentNotes !== undefined && attachmentNotes !== null) {
+        if (typeof attachmentNotes !== 'string') {
+          return res.status(400).json({ error: "attachmentNotes must be a string or null." });
+        }
+        const trimmed = attachmentNotes.trim();
+        if (trimmed.length > 500) {
+          return res.status(400).json({ error: "attachmentNotes cannot exceed 500 characters." });
+        }
+        normalizedAttachmentNotes = trimmed.length > 0 ? trimmed : null;
+      }
+
+      // 3. Build canonical payload strictly from validated, normalized values
+      const canonicalPayload = {
+        actionDateTime: actionDateTime !== undefined && actionDateTime !== null ? effectiveActionDateTime.toISOString() : undefined,
+        actionDescription: normalizedActionDescription,
+        attachmentNotes: normalizedAttachmentNotes,
+        followUpNote: normalizedFollowUpNote,
+        followUpRequired,
+        result: normalizedResult
+      };
+      const requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+
+      // 4. Pre-lookup IdempotencyKey and handle 24-hour expiration
+      const existingKey = await prisma.idempotencyKey.findUnique({
+        where: {
+          route_ticketId_userId_key: {
+            route: "POST /api/tickets/:id/actions",
+            ticketId,
+            userId: req.user.id,
+            key: idempotencyKey
           }
-        });
-        if (existingKey) {
-          if (existingKey.expiresAt > new Date()) {
-            if (existingKey.statusCode !== null && existingKey.responseBody !== null) {
-              if (existingKey.requestHash === requestHash) {
-                res.setHeader('Idempotency-Replayed', 'true');
-                return res.status(existingKey.statusCode).json(JSON.parse(existingKey.responseBody));
-              }
-              return res.status(409).json({ error: "Idempotency key reused with different request payload" });
+        }
+      });
+      if (existingKey) {
+        if (existingKey.expiresAt > new Date()) {
+          if (existingKey.statusCode !== null && existingKey.responseBody !== null) {
+            if (existingKey.requestHash === requestHash) {
+              res.setHeader('Idempotency-Replayed', 'true');
+              return res.status(existingKey.statusCode).json(JSON.parse(existingKey.responseBody));
             }
-          } else {
-            // Expired entry (> 24 hours): prune safely using deleteMany to tolerate concurrent purges
-            await prisma.idempotencyKey.deleteMany({
-              where: { id: existingKey.id, expiresAt: { lte: new Date() } }
-            });
+            return res.status(409).json({ error: "Idempotency key reused with different request payload" });
           }
+        } else {
+          // Expired entry (> 24 hours): prune safely using deleteMany to tolerate concurrent purges
+          await prisma.idempotencyKey.deleteMany({
+            where: { id: existingKey.id, expiresAt: { lte: new Date() } }
+          });
         }
       }
 
-      // Rename transaction result variable to createdAction to avoid shadowing request field 'result'
+      // 5. In-Transaction execution: read-only checks allowed before Phase 1 reservation
       const createdAction = await prisma.$transaction(async (tx) => {
-        // 1. Verify parent ticket exists
+        // 5.1 Read-only verification of parent ticket existence
         const ticket = await tx.ticket.findUnique({ where: { id: ticketId } });
         if (!ticket) {
           const err = new Error("Ticket not found");
@@ -169,59 +343,53 @@ Key architectural rules:
           throw err;
         }
 
-        // 2. Reserve idempotency slot FIRST if key was provided (Phase 1 Reservation)
+        // 5.2 Phase 1 Reservation Claim (before domain mutation or CAS update)
         // Under PostgreSQL, competing concurrent requests with the identical compound key block
         // on the unique index tuple lock here BEFORE modifying any tables or evaluating CAS.
-        let reservationId: number | null = null;
-        if (idempotencyKey) {
-          const reservation = await tx.idempotencyKey.create({
-            data: {
-              key: idempotencyKey,
-              route: "POST /api/tickets/:id/actions",
-              ticketId,
-              userId: req.user.id,
-              requestHash,
-              statusCode: null,
-              responseBody: null,
-              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-            }
-          });
-          reservationId = reservation.id;
-        }
+        const reservation = await tx.idempotencyKey.create({
+          data: {
+            key: idempotencyKey,
+            route: "POST /api/tickets/:id/actions",
+            ticketId,
+            userId: req.user.id,
+            requestHash,
+            statusCode: null,
+            responseBody: null,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+          }
+        });
 
-        // 3. Create ActionTaken record with immutable session actor (result is accessed without TDZ/shadowing)
+        // 5.3 Create ActionTaken record with immutable session actor
         const action = await tx.actionTaken.create({
           data: {
             ticketId,
-            actionDateTime: actionDateTime ? new Date(actionDateTime) : new Date(),
-            actionDescription: actionDescription.trim(),
-            result: result.trim(),
+            actionDateTime: effectiveActionDateTime,
+            actionDescription: normalizedActionDescription,
+            result: normalizedResult,
             performedById: req.user.id,
             followUpRequired,
-            followUpNote: followUpRequired ? followUpNote.trim() : null,
-            attachmentNotes: attachmentNotes ? attachmentNotes.trim() : null
+            followUpNote: normalizedFollowUpNote,
+            attachmentNotes: normalizedAttachmentNotes
           },
           include: {
             performedBy: { select: { id: true, name: true, role: true, email: true } }
           }
         });
 
-        // 4. Atomically refresh parent Ticket.updatedAt
+        // 5.4 Atomically refresh parent Ticket.updatedAt
         await tx.ticket.update({
           where: { id: ticketId },
           data: { updatedAt: new Date() }
         });
 
-        // 5. Finalize idempotency reservation with response payload and status before commit
-        if (reservationId) {
-          await tx.idempotencyKey.update({
-            where: { id: reservationId },
-            data: {
-              statusCode: 201,
-              responseBody: JSON.stringify(action)
-            }
-          });
-        }
+        // 5.5 Finalize idempotency reservation with response payload and status before commit
+        await tx.idempotencyKey.update({
+          where: { id: reservation.id },
+          data: {
+            statusCode: 201,
+            responseBody: JSON.stringify(action)
+          }
+        });
 
         return action;
       });
@@ -290,7 +458,7 @@ Key architectural rules:
     ```
 *   **Response Shape (201 Created):** Returns created `ActionTaken` object with populated `performedBy` relation.
 *   **Errors:**
-    *   `400 Bad Request`: Missing required fields, validation failure (future date, note > 2000 chars, attachmentNotes > 500 chars), or `followUpRequired: true` without `followUpNote`.
+    *   `400 Bad Request`: Missing or malformed `Idempotency-Key` header, missing required fields, validation failure (future date, note > 2000 chars, attachmentNotes > 500 chars), or `followUpRequired: true` without `followUpNote`.
     *   `401 Unauthorized`: Unauthenticated.
     *   `403 Forbidden`: Authenticated user is a Requester.
     *   `404 Not Found`: Ticket does not exist.
@@ -313,100 +481,460 @@ Key architectural rules:
     }
     ```
 *   **Validation Rules:**
-    *   `actionLastUpdatedAt`: ISO 8601 string, **mandatory**. If omitted, returns `400 Bad Request` (`{ error: "actionLastUpdatedAt is required for concurrency validation." }`).
-    *   `actionDescription`: String, optional. If provided, must contain 1–2000 non-whitespace characters after trimming. Supplying empty or whitespace-only text returns `400 Bad Request`.
-    *   `result`: String, optional. If provided, must contain 1–2000 non-whitespace characters after trimming. Supplying empty or whitespace-only text returns `400 Bad Request`.
-    *   `actionDateTime`: ISO 8601 string, optional, cannot be in the future.
-    *   `followUpRequired`: Boolean, optional.
-    *   `followUpNote`: Conditionally mandatory when `followUpRequired === true`: must be validated as a non-empty string (1–2000 non-whitespace chars) before calling `.trim()`. If missing, null, or empty whitespace, returns `400 Bad Request`. When `followUpRequired === false`, must be `null` (or is coerced to `null`).
-    *   `attachmentNotes`: String, optional, max 500 chars. If empty string or whitespace-only, normalized to `null`.
-    *   `performedById`: Server-managed and strictly immutable. Any attempt to supply `performedById` in the request body is stripped and ignored by the server, preserving the original performer intact.
+    *   `actionLastUpdatedAt`: ISO 8601 string, **mandatory**. Must pass `parseStrictIsoTimestamp`. If omitted, malformed, or invalid calendar date, returns `400 Bad Request` (`{ error: "actionLastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." }`).
     *   *Payload Completeness:* At least one mutable field (`actionDescription`, `result`, `actionDateTime`, `followUpRequired`, `followUpNote`, `attachmentNotes`) must be supplied in addition to `actionLastUpdatedAt`. If omitted, returns `400 Bad Request` (`{ error: "At least one mutable field must be provided for update." }`).
+    *   `actionDescription`: String, optional. If provided, must contain 1–2000 non-whitespace characters after trimming. Supplying empty string, whitespace-only, non-string, or text exceeding 2000 characters returns `400 Bad Request`. Exactly 2000 trimmed characters are accepted; 2001 characters are rejected.
+    *   `result`: String, optional. If provided, must contain 1–2000 non-whitespace characters after trimming. Supplying empty string, whitespace-only, non-string, or text exceeding 2000 characters returns `400 Bad Request`. Exactly 2000 trimmed characters are accepted; 2001 characters are rejected.
+    *   `actionDateTime`: ISO 8601 string, optional. If supplied, must pass `parseStrictIsoTimestamp` and cannot be in the future. Valid `Z` and `±HH:mm` timestamps are accepted and converted to their correct UTC instant. Supplying an invalid format, unparseable timestamp, or future date returns `400 Bad Request`.
+    *   `followUpRequired`: Boolean, optional. Must be an actual boolean primitive if supplied (`typeof followUpRequired === 'boolean'`).
+    *   `followUpNote`: Conditionally validated based on the effective `followUpRequired` state:
+        *   PATCH supports partial field updates: omitted fields retain their existing values from the database.
+        *   Effective state is calculated by merging current database values with incoming PATCH fields prior to validation.
+        *   When effective `followUpRequired === true`, the resulting `followUpNote` must be a non-empty string of 1–2000 non-whitespace characters after trimming. Exactly 2000 trimmed characters are accepted; 2001 characters are rejected with `400 Bad Request`.
+        *   Transitioning `followUpRequired` from `false` to `true` without supplying a valid `followUpNote` returns `400 Bad Request`.
+        *   When `followUpRequired` is already `true`, updating other fields without resending `followUpNote` preserves the existing note without forcing the client to retransmit it.
+        *   When `followUpRequired` is already `true`, sending a new `followUpNote` without resending `followUpRequired` updates the note.
+        *   When effective `followUpRequired === false`, `followUpNote` is set to `null` always, regardless of whether a note was included in the request payload.
+    *   `attachmentNotes`: String, optional, max 500 characters after trimming. If empty string or whitespace-only, normalized to `null`. Text exceeding 500 characters returns `400 Bad Request`.
+    *   `performedById`: Server-managed and strictly immutable. Any attempt to supply `performedById` in the request body is stripped and ignored by the server, preserving the original performer intact.
+    *   *No-op Handling:*
+        *   If at least one mutable field is provided, but after normalization and merging with current database values, all 6 editable fields (`actionDateTime`, `actionDescription`, `result`, `followUpRequired`, `followUpNote`, `attachmentNotes`) produce zero net change against the existing record, the request is treated as a No-op.
+        *   No-op performs the standard CAS verification against `expectedActionLastUpdatedAt`.
+        *   If the CAS token matches, No-op returns `200 OK` with the unchanged record.
+        *   If the CAS token is stale, No-op returns `409 Conflict`.
+        *   A No-op does NOT create an `ActionTakenRevision` record.
+        *   A No-op does NOT modify `ActionTaken.updatedAt`.
+        *   A No-op does NOT refresh the parent `Ticket.updatedAt`.
 *   **Atomic Conditional CAS Update Implementation Pattern:**
     ```typescript
     try {
-      // Validate that at least one mutable field is provided
-      const mutableFields = [actionDescription, result, actionDateTime, followUpRequired, followUpNote, attachmentNotes];
-      if (mutableFields.every((f) => f === undefined)) {
-        return res.status(400).json({ error: "At least one mutable field must be provided for update." });
+      // 1. Validate the mandatory CAS token before any database mutation using strict parser
+      const parsedExpectedUpdatedAt = parseStrictIsoTimestamp(actionLastUpdatedAt);
+      if (!parsedExpectedUpdatedAt) {
+        return res.status(400).json({
+          error: "actionLastUpdatedAt is required and must be a valid strict ISO 8601 timestamp."
+        });
+      }
+      const expectedActionLastUpdatedAt = parsedExpectedUpdatedAt;
+
+      // 2. At least one mutable field must be supplied
+      const mutableFields = [
+        actionDescription,
+        result,
+        actionDateTime,
+        followUpRequired,
+        followUpNote,
+        attachmentNotes
+      ];
+
+      if (mutableFields.every((field) => field === undefined)) {
+        return res.status(400).json({
+          error: "At least one mutable field must be provided for update."
+        });
       }
 
-      // Validate non-empty text strings if provided
-      if (actionDescription !== undefined && actionDescription.trim() === '') {
-        return res.status(400).json({ error: "actionDescription cannot be empty or whitespace-only." });
-      }
-      if (result !== undefined && result.trim() === '') {
-        return res.status(400).json({ error: "result cannot be empty or whitespace-only." });
-      }
-
-      // Validate followUpNote before trimming
-      if (followUpRequired === true) {
-        if (!followUpNote || typeof followUpNote !== 'string' || followUpNote.trim() === '') {
-          return res.status(400).json({ error: "followUpNote is required when followUpRequired is true." });
+      // 3. Validate supplied values before entering the transaction
+      if (actionDescription !== undefined) {
+        if (typeof actionDescription !== 'string' || actionDescription.trim().length < 1 || actionDescription.trim().length > 2000) {
+          return res.status(400).json({
+            error: "actionDescription must be 1-2000 characters after trimming."
+          });
         }
       }
 
+      if (result !== undefined) {
+        if (typeof result !== 'string' || result.trim().length < 1 || result.trim().length > 2000) {
+          return res.status(400).json({
+            error: "result must be 1-2000 characters after trimming."
+          });
+        }
+      }
+
+      let parsedActionDateTime: Date | undefined;
+      if (actionDateTime !== undefined) {
+        parsedActionDateTime = parseStrictIsoTimestamp(actionDateTime) ?? undefined;
+        if (!parsedActionDateTime) {
+          return res.status(400).json({
+            error: "actionDateTime must be a valid strict ISO 8601 timestamp."
+          });
+        }
+        if (parsedActionDateTime > new Date()) {
+          return res.status(400).json({
+            error: "actionDateTime cannot be in the future."
+          });
+        }
+      }
+
+      if (
+        followUpRequired !== undefined &&
+        typeof followUpRequired !== 'boolean'
+      ) {
+        return res.status(400).json({
+          error: "followUpRequired must be a boolean."
+        });
+      }
+
+      if (followUpNote !== undefined && followUpNote !== null) {
+        if (typeof followUpNote !== 'string' || followUpNote.trim().length < 1 || followUpNote.trim().length > 2000) {
+          return res.status(400).json({
+            error: "followUpNote must be a string of 1-2000 characters after trimming."
+          });
+        }
+      }
+
+      if (
+        attachmentNotes !== undefined &&
+        attachmentNotes !== null &&
+        typeof attachmentNotes !== 'string'
+      ) {
+        return res.status(400).json({
+          error: "attachmentNotes must be a string or null."
+        });
+      }
+
+      if (
+        typeof attachmentNotes === 'string' &&
+        attachmentNotes.trim().length > 500
+      ) {
+        return res.status(400).json({
+          error: "attachmentNotes cannot exceed 500 characters."
+        });
+      }
+
+      // 4. Execute CAS, compare effective values, and write revision atomically
       const updated = await prisma.$transaction(async (tx) => {
-        // 1. Conditional update combining entity ID, ticketId, and expected updatedAt token
-        const updateResult = await tx.actionTaken.updateMany({
+        // 4.1 Fetch the existing Action Taken and verify parent association
+        const existing = await tx.actionTaken.findFirst({
           where: {
             id: actionId,
-            ticketId: ticketId,
-            updatedAt: new Date(actionLastUpdatedAt)
-          },
-          data: {
-            ...(actionDescription !== undefined && { actionDescription: actionDescription.trim() }),
-            ...(result !== undefined && { result: result.trim() }),
-            ...(actionDateTime !== undefined && { actionDateTime: new Date(actionDateTime) }),
-            ...(followUpRequired !== undefined && { followUpRequired }),
-            ...(followUpRequired === true && { followUpNote: followUpNote.trim() }),
-            ...(followUpRequired === false && { followUpNote: null }),
-            ...(attachmentNotes !== undefined && { attachmentNotes: attachmentNotes.trim() ? attachmentNotes.trim() : null }),
-            updatedAt: new Date()
+            ticketId
           }
         });
 
-        // 2. Affected row check: distinguish not found (404) from concurrency conflict (409)
+        if (!existing) {
+          const err = new Error("Action Taken not found");
+          (err as any).status = 404;
+          throw err;
+        }
+
+        // 4.2 Merge supplied values with existing values.
+        // Omitted fields must preserve their existing values.
+        const nextActionDateTime =
+          parsedActionDateTime !== undefined
+            ? parsedActionDateTime
+            : existing.actionDateTime;
+
+        const nextActionDescription =
+          actionDescription !== undefined
+            ? actionDescription.trim()
+            : existing.actionDescription;
+
+        const nextResult =
+          result !== undefined
+            ? result.trim()
+            : existing.result;
+
+        const nextFollowUpRequired =
+          followUpRequired !== undefined
+            ? followUpRequired
+            : existing.followUpRequired;
+
+        // followUpNote depends on the effective followUpRequired value.
+        // When follow-up is disabled, the note must always become null.
+        // When enabled, an omitted note preserves the existing note.
+        // A supplied note is accepted even when followUpRequired is omitted.
+        let nextFollowUpNote: string | null;
+
+        if (nextFollowUpRequired === false) {
+          nextFollowUpNote = null;
+        } else if (followUpNote !== undefined) {
+          nextFollowUpNote =
+            typeof followUpNote === 'string'
+              ? followUpNote.trim()
+              : null;
+        } else {
+          nextFollowUpNote = existing.followUpNote;
+        }
+
+        // Validate effective merged note before CAS update
+        if (
+          nextFollowUpRequired === true &&
+          (
+            typeof nextFollowUpNote !== 'string' ||
+            nextFollowUpNote.trim().length < 1 ||
+            nextFollowUpNote.trim().length > 2000
+          )
+        ) {
+          const err = new Error(
+            "followUpNote is required (1-2000 characters) when the resulting followUpRequired value is true."
+          );
+          (err as any).status = 400;
+          throw err;
+        }
+
+        const nextAttachmentNotes =
+          attachmentNotes !== undefined
+            ? (
+                typeof attachmentNotes === 'string' &&
+                attachmentNotes.trim() !== ''
+              )
+              ? attachmentNotes.trim()
+              : null
+            : existing.attachmentNotes;
+
+        // 4.3 Build complete before/after snapshots.
+        // Snapshots contain all six editable fields.
+        const beforeSnapshot = {
+          actionDateTime: existing.actionDateTime.toISOString(),
+          actionDescription: existing.actionDescription,
+          result: existing.result,
+          followUpRequired: existing.followUpRequired,
+          followUpNote: existing.followUpNote,
+          attachmentNotes: existing.attachmentNotes
+        };
+
+        const afterSnapshot = {
+          actionDateTime: nextActionDateTime.toISOString(),
+          actionDescription: nextActionDescription,
+          result: nextResult,
+          followUpRequired: nextFollowUpRequired,
+          followUpNote: nextFollowUpNote,
+          attachmentNotes: nextAttachmentNotes
+        };
+
+        // 4.4 Detect whether any normalized editable value actually changed.
+        // Date values are compared by timestamp, not by their original string format.
+        const hasChanges =
+          nextActionDateTime.getTime() !== existing.actionDateTime.getTime() ||
+          nextActionDescription !== existing.actionDescription ||
+          nextResult !== existing.result ||
+          nextFollowUpRequired !== existing.followUpRequired ||
+          nextFollowUpNote !== existing.followUpNote ||
+          nextAttachmentNotes !== existing.attachmentNotes;
+
+        // 4.5 Perform database-level CAS.
+        // For a real edit, update all six effective values and refresh ActionTaken.updatedAt.
+        // For a no-op, preserve ActionTaken.updatedAt while still checking the CAS token.
+        const changedAt = new Date();
+
+        const updateResult = await tx.actionTaken.updateMany({
+          where: {
+            id: actionId,
+            ticketId,
+            updatedAt: expectedActionLastUpdatedAt
+          },
+          data: hasChanges
+            ? {
+                actionDateTime: nextActionDateTime,
+                actionDescription: nextActionDescription,
+                result: nextResult,
+                followUpRequired: nextFollowUpRequired,
+                followUpNote: nextFollowUpNote,
+                attachmentNotes: nextAttachmentNotes,
+                updatedAt: changedAt
+              }
+            : {
+                // Deliberate no-op CAS check.
+                // Keep the logical timestamp unchanged.
+                updatedAt: existing.updatedAt
+              }
+        });
+
+        // 4.6 Distinguish missing records from stale CAS tokens.
         if (updateResult.count === 0) {
-          const exists = await tx.actionTaken.findFirst({ where: { id: actionId, ticketId } });
-          if (!exists) {
+          const current = await tx.actionTaken.findFirst({
+            where: {
+              id: actionId,
+              ticketId
+            }
+          });
+
+          if (!current) {
             const err = new Error("Action Taken not found");
             (err as any).status = 404;
             throw err;
           }
-          const err = new Error("Action Taken was modified by another session. Please reload and try again.");
+
+          const err = new Error(
+            "Action Taken was modified by another session. Please reload and try again."
+          );
           (err as any).status = 409;
           throw err;
         }
 
-        // 3. Atomically refresh parent Ticket.updatedAt
-        await tx.ticket.update({
-          where: { id: ticketId },
-          data: { updatedAt: new Date() }
+        // 4.7 Only a real change creates exactly one append-only revision.
+        // A no-op must never create a revision row.
+        if (hasChanges) {
+          await tx.actionTakenRevision.create({
+            data: {
+              actionTakenId: actionId,
+              editedById: req.user.id,
+              beforeSnapshot,
+              afterSnapshot
+              // editedAt is generated by the database/schema default.
+            }
+          });
+
+          // Refresh the parent Ticket only for a real Action Taken edit.
+          await tx.ticket.update({
+            where: {
+              id: ticketId
+            },
+            data: {
+              updatedAt: changedAt
+            }
+          });
+        }
+
+        // 4.8 Return the final Action Taken record.
+        // No-op returns the unchanged record with its original updatedAt.
+        const updatedAction = await tx.actionTaken.findUnique({
+          where: {
+            id: actionId
+          },
+          include: {
+            performedBy: {
+              select: {
+                id: true,
+                name: true,
+                role: true,
+                email: true
+              }
+            }
+          }
         });
 
-        // 4. Return updated record with populated performer details
-        return await tx.actionTaken.findUnique({
-          where: { id: actionId },
-          include: { performedBy: { select: { id: true, name: true, role: true, email: true } } }
-        });
+        if (!updatedAction) {
+          const err = new Error("Action Taken not found");
+          (err as any).status = 404;
+          throw err;
+        }
+
+        return updatedAction;
       });
 
-      // Send HTTP response strictly after transaction commit
+      // Send the HTTP response only after the transaction commits.
       return res.status(200).json(updated);
+
     } catch (err: any) {
       if (err.status) {
-        return res.status(err.status).json({ error: err.message });
+        return res.status(err.status).json({
+          error: err.message
+        });
       }
-      return res.status(500).json({ error: "Internal server error" });
+
+      // Database failures, including revision insertion or parent Ticket refresh
+      // failures, must result in transaction rollback and a safe 500 response.
+      return res.status(500).json({
+        error: "Internal server error"
+      });
     }
     ```
 *   **Errors:**
-    *   `400 Bad Request`: Missing `actionLastUpdatedAt`, no mutable fields provided, empty/whitespace string for `actionDescription` or `result`, or invalid `followUpNote`.
+    *   `400 Bad Request`: Missing or invalid `actionLastUpdatedAt`, no mutable fields provided, invalid `actionDateTime` format, future `actionDateTime`, empty or overlength `actionDescription` (> 2000 characters), empty or overlength `result` (> 2000 characters), invalid or overlength `followUpNote` (> 2000 characters), or overlength `attachmentNotes` (> 500 characters).
     *   `401 Unauthorized`: Unauthenticated.
     *   `403 Forbidden`: Requester role.
     *   `404 Not Found`: Action Taken or Ticket does not exist.
     *   `409 Conflict`: Stale update detected (conditional update affected 0 rows due to timestamp mismatch).
+
+### 2.4 GET `/api/tickets/:id/actions/:actionId/revisions`
+*   **Purpose:** Retrieve the ordered timeline of revision history for a specific Action Taken.
+*   **Authentication:** Required.
+*   **Permitted Roles:** `IT Staff`, `Administrator`. (Requesters receive `403 Forbidden` if they own the ticket, or `404 Not Found` if they do not own the ticket, preserving non-enumeration).
+*   **Parameters:** `id` (integer in path), `actionId` (integer in path).
+*   **Ordering:** Strictly deterministic chronological order: `ORDER BY editedAt ASC, id ASC`.
+*   **Non-Fabrication Policy:** Existing legacy actions with zero edits return an empty array `[]`. No artificial or fabricated past revisions are generated.
+*   **Response Shape (200 OK):**
+    ```json
+    [
+      {
+        "id": 1,
+        "actionTakenId": 101,
+        "editedById": 6,
+        "editedBy": {
+          "id": 6,
+          "name": "Staff One",
+          "email": "staff1@example.com",
+          "role": "IT Staff"
+        },
+        "editedAt": "2026-11-01T10:15:00.000Z",
+        "beforeSnapshot": {
+          "actionDateTime": "2026-11-01T08:30:00.000Z",
+          "actionDescription": "Checked switch port configuration and re-terminated cable.",
+          "result": "Link light restored; packet loss dropped to 0%.",
+          "followUpRequired": true,
+          "followUpNote": "Monitor error rates over the next 24 hours.",
+          "attachmentNotes": "See ping_results.png in ticket attachments."
+        },
+        "afterSnapshot": {
+          "actionDateTime": "2026-11-01T08:30:00.000Z",
+          "actionDescription": "Checked switch port configuration and re-terminated cable (updated with port details).",
+          "result": "24-hour observation complete: 0 errors detected.",
+          "followUpRequired": false,
+          "followUpNote": null,
+          "attachmentNotes": "See ping_results.png and error_log.txt"
+        }
+      }
+    ]
+    ```
+*   **Errors:**
+    *   `400 Bad Request`: Invalid ticket ID or action ID format.
+    *   `401 Unauthorized`: Missing or invalid session.
+    *   `403 Forbidden`: Authenticated user is a Requester requesting a ticket they own.
+    *   `404 Not Found`: Ticket not found, Action Taken not found, OR requested by a Requester who does not own the parent ticket (non-enumeration).
+
+### 2.4.1 True Append-Only Enforcement & PostgreSQL Trigger Specification (Proposed Migration Requirement)
+`ActionTakenRevision` records are strictly append-only. The application provides no HTTP endpoints to modify or delete revisions. To guarantee that revisions cannot be rewritten, deleted, or pruned even via direct database connections, the future database migration will install PostgreSQL triggers, a trigger function, and role privilege restrictions:
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_action_taken_revision_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'ActionTakenRevision records are append-only and cannot be updated, deleted, or truncated.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_action_taken_revision_mutation
+BEFORE UPDATE OR DELETE ON "ActionTakenRevision"
+FOR EACH ROW
+EXECUTE FUNCTION prevent_action_taken_revision_mutation();
+
+CREATE TRIGGER trg_prevent_action_taken_revision_truncate
+BEFORE TRUNCATE ON "ActionTakenRevision"
+FOR EACH STATEMENT
+EXECUTE FUNCTION prevent_action_taken_revision_mutation();
+
+-- Revoke TRUNCATE privilege on ActionTakenRevision from the application database role
+-- ('toktickit' is verified as the default application role in server/.env.example;
+-- in custom/production environments, replace with the verified unprivileged runtime role)
+REVOKE TRUNCATE ON TABLE "ActionTakenRevision" FROM toktickit;
+```
+
+*Execution Semantics & Privilege Layering:*
+*   `INSERT` statements remain fully permitted (executing during `PATCH /api/tickets/:id/actions/:actionId` within the atomic CAS transaction).
+*   `UPDATE` statements are blocked by the row-level trigger (`trg_prevent_action_taken_revision_mutation`) for database roles that have update privileges and cannot disable the trigger, raising SQL exception: `'ActionTakenRevision records are append-only and cannot be updated, deleted, or truncated.'`.
+*   `DELETE` statements are blocked by the row-level trigger for database roles that have delete privileges, raising the same exception.
+*   `TRUNCATE` statements are blocked by the statement-level trigger (`trg_prevent_action_taken_revision_truncate`) for a permitted non-owner, non-superuser role while the trigger remains enabled.
+*   For the application runtime role, `TRUNCATE` is additionally barred at the PostgreSQL privilege layer via `REVOKE TRUNCATE`. When an unprivileged runtime connection attempts `TRUNCATE`, PostgreSQL rejects the operation at the privilege checking layer with SQLSTATE `42501` (`permission denied for table ActionTakenRevision`) before any trigger executes.
+*   *Security & Role Limitations:* These database protections protect against application bugs and standard database connections. They do not protect against a PostgreSQL superuser (who can disable or drop triggers and bypass privilege checks), nor do revoked privileges restrict table owners (as PostgreSQL bypasses privilege checks for table owners). Consequently, production deployment strictly requires that the application runtime role must NOT be the table owner or a PostgreSQL superuser.
+
+*Deployment Requirement on Runtime Role Privilege:*
+*   The default application runtime database role is verified as `toktickit` per `server/.env.example` (`postgresql://toktickit:toktickit@localhost:5432/toktickit?schema=public`).
+*   In custom, staging, or production environments, substitute `toktickit` with the verified application runtime database username.
+*   The application runtime role must be provisioned as a regular unprivileged role and must **never** be the database table owner or a PostgreSQL superuser.
+
+*Testing Connection Semantics:*
+*   **Trigger Test Connection:** Uses a privileged, non-owner, non-superuser database role possessing `UPDATE`, `DELETE`, and `TRUNCATE` table privileges. Direct SQL `UPDATE`, `DELETE`, and `TRUNCATE` executed over this connection reach the triggers and assert trigger exception `'ActionTakenRevision records are append-only and cannot be updated, deleted, or truncated.'`.
+*   **Application Runtime Connection:** Uses the authenticated unprivileged application runtime role (e.g. `toktickit`). Direct SQL `TRUNCATE` over this connection asserts immediate denial at the PostgreSQL privilege checking layer with SQLSTATE `42501` prior to trigger invocation.
+
+*Note on Migration Stage:* This trigger, function, and privilege specification is a **proposed migration requirement at the documentation stage** and will be implemented as part of the future database migration.
+
+*Rollback Teardown Order:*
+If a migration rollback is required:
+1. `DROP TRIGGER IF EXISTS trg_prevent_action_taken_revision_truncate ON "ActionTakenRevision";`
+2. `DROP TRIGGER IF EXISTS trg_prevent_action_taken_revision_mutation ON "ActionTakenRevision";`
+3. `DROP FUNCTION IF EXISTS prevent_action_taken_revision_mutation();`
+4. `DROP TABLE IF EXISTS "ActionTakenRevision" CASCADE;`
 
 ---
 
@@ -606,10 +1134,10 @@ Key architectural rules:
     }
     ```
 *   **Validation Rules:**
-    *   `lastUpdatedAt`: ISO 8601 string, **mandatory**. If omitted, returns `400 Bad Request` (`{ error: "lastUpdatedAt is required for concurrency validation." }`).
+    *   `lastUpdatedAt`: ISO 8601 string, **mandatory**. Must pass `parseStrictIsoTimestamp`. If omitted, malformed, or invalid calendar date, returns `400 Bad Request` (`{ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." }`).
     *   `status`: String, valid target status per the 13-row transition matrix below.
     *   `itPriority`: String, optional (`Low`, `Medium`, `High`, `Critical`).
-    *   `comment`: String, mandatory when transitioning to `Waiting for Requester` or `Resolved`.
+    *   `comment`: String, mandatory when transitioning to `Waiting for Requester`. Strictly optional when transitioning to `Resolved` (creates `PublicComment` only if non-empty).
     *   `reason`: String, mandatory when transitioning to `Cancelled` or `Reopened`.
 *   **Permitted Status Transitions Matrix (13 Permitted IT Staff Transitions):**
 
@@ -620,14 +1148,14 @@ Key architectural rules:
 | 3 | `Open` | `In Progress` | IT Staff | Ticket must have an assigned owner (`ownerId != null`). |
 | 4 | `Open` | `Waiting for Requester` | IT Staff | Public `comment` is required; generates a `PublicComment`. |
 | 5 | `In Progress` | `Waiting for Requester` | IT Staff | Public `comment` is required; generates a `PublicComment`. |
-| 6 | `Waiting for Requester` | `In Progress` | IT Staff | Staff resumes active work. |
-| 7 | `Waiting for Requester` | `Open` | IT Staff | Staff resets ticket to open queue. |
-| 8 | `In Progress` | `Resolved` | IT Staff | **Resolution Gate**: requires `>= 1` Action Taken AND non-empty resolution `comment` (creates `PublicComment`); **sets `resolvedAt = NOW()`**. |
+| 6 | `Waiting for Requester` | `In Progress` | IT Staff | Staff resumes active work (`ownerId = null` permitted). |
+| 7 | `Waiting for Requester` | `Open` | IT Staff | Staff resets ticket to open queue (`ownerId = null` permitted). |
+| 8 | `In Progress` | `Resolved` | IT Staff | **Resolution Gate**: requires `>= 1` Action Taken (mandatory); non-empty resolution `comment` is optional (creates `PublicComment` only if provided); **sets `resolvedAt = NOW()`**. |
 | 9 | `Resolved` | `Closed` | IT Staff | Final closure confirmation; preserves `resolvedAt`. |
 | 10| `Closed` | `Reopened` | IT Staff | Exceptionally reopened; requires `reason` (creates `InternalNote`); **clears `resolvedAt` to `null`**. |
 | 11| `Reopened` | `In Progress` | IT Staff | Staff resumes active work; ticket must have an assigned owner (`ownerId != null`); retains already-null `resolvedAt` value. |
-| 12| `Reopened` | `Open` | IT Staff | Staff resets ticket to open pool; retains already-null `resolvedAt` value. |
-| 13| `Reopened` | `Waiting for Requester` | IT Staff | Staff requests additional information; requires public `comment` (creates `PublicComment`); retains already-null `resolvedAt` value. |
+| 12| `Reopened` | `Open` | IT Staff | Staff resets ticket to open pool (`ownerId = null` permitted); retains already-null `resolvedAt` value. |
+| 13| `Reopened` | `Waiting for Requester` | IT Staff | Staff requests additional information; requires public `comment` (creates `PublicComment`); `ownerId = null` permitted; retains already-null `resolvedAt` value. |
 
 *   **Distinct Comment-Driven Requester Transitions (Reconciled with Matrix):**
     *   The 13 transitions above govern explicit IT Staff transitions via `PATCH /api/staff/tickets/:id/status`. (Administrators receive `403 Forbidden`).
@@ -637,6 +1165,12 @@ Key architectural rules:
 *   **Atomic CAS & Side-Effect Transaction Implementation Pattern:**
     ```typescript
     try {
+      // Upfront validation before entering transaction: mandatory lastUpdatedAt concurrency token
+      const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+      if (!parsedLastUpdatedAt) {
+        return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
+      }
+
       const updatedTicket = await prisma.$transaction(async (tx) => {
         // 1. Fetch ticket inside transaction to evaluate current state
         const ticket = await tx.ticket.findUnique({ where: { id: ticketId } });
@@ -663,40 +1197,42 @@ Key architectural rules:
           throw err;
         }
 
-        // 3. Validate owner requirement for transitions requiring assigned owner
-        if (['Open', 'In Progress'].includes(status) && !ticket.ownerId) {
-          const err = new Error("Ticket must have an assigned owner before transitioning to Open or In Progress.");
+        // 3. Validate owner requirement for exact source-target transitions requiring assigned owner
+        const ownerRequiredTransitions = new Set(['New->Open', 'Open->In Progress', 'Reopened->In Progress']);
+        const transitionKey = `${ticket.status}->${status}`;
+        if (ownerRequiredTransitions.has(transitionKey) && !ticket.ownerId) {
+          const err = new Error(`Ticket must be assigned to an owner before transitioning from '${ticket.status}' to '${status}'.`);
           (err as any).status = 400;
           throw err;
         }
 
-        // 4. Validate Resolution Gate within the transaction
+        // 4. Validate Resolution Gate within the transaction (Action Count is sole mandatory condition)
         if (status === 'Resolved') {
           const actionCount = await tx.actionTaken.count({ where: { ticketId } });
           if (actionCount === 0) {
-            const err = new Error("Resolution Gate failed: At least one Action Taken must be recorded before resolving this ticket.");
+            const err = new Error("At least one action taken must be recorded before resolving the ticket.");
             (err as any).status = 400;
             throw err;
           }
-          if (!comment || comment.trim() === '') {
-            const err = new Error("Resolution comment is required.");
-            (err as any).status = 400;
-            throw err;
-          }
+          // Note: Resolution comment is strictly optional. If provided and non-empty, creates PublicComment; otherwise no comment is created and transition is not blocked.
         }
 
         // 5. Validate cancellation or reopen reason
-        if (['Cancelled', 'Reopened'].includes(status) && (!reason || reason.trim() === '')) {
-          const err = new Error(`${status} reason is required.`);
-          (err as any).status = 400;
-          throw err;
+        if (['Cancelled', 'Reopened'].includes(status)) {
+          if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+            const err = new Error(`${status} reason is required.`);
+            (err as any).status = 400;
+            throw err;
+          }
         }
 
         // 6. Validate required public comment for Waiting for Requester
-        if (status === 'Waiting for Requester' && (!comment || comment.trim() === '')) {
-          const err = new Error("Public comment is required when placing ticket in Waiting for Requester.");
-          (err as any).status = 400;
-          throw err;
+        if (status === 'Waiting for Requester') {
+          if (!comment || typeof comment !== 'string' || comment.trim() === '') {
+            const err = new Error("Public comment is required when placing ticket in Waiting for Requester.");
+            (err as any).status = 400;
+            throw err;
+          }
         }
 
         // 7. Conditional update matching ticket ID, current status, and expected lastUpdatedAt token
@@ -704,7 +1240,7 @@ Key architectural rules:
           where: {
             id: ticketId,
             status: ticket.status,
-            updatedAt: new Date(lastUpdatedAt)
+            updatedAt: parsedLastUpdatedAt
           },
           data: {
             status,
@@ -728,12 +1264,17 @@ Key architectural rules:
         }
 
         // 9. Atomic side effects within the same transaction
-        if (comment && ['Waiting for Requester', 'Resolved'].includes(status)) {
+        if (status === 'Resolved' && comment && typeof comment === 'string' && comment.trim() !== '') {
           await tx.publicComment.create({
             data: { content: comment.trim(), ticketId, authorId: req.user.id }
           });
         }
-        if (reason && ['Cancelled', 'Reopened'].includes(status)) {
+        if (status === 'Waiting for Requester' && comment && typeof comment === 'string' && comment.trim() !== '') {
+          await tx.publicComment.create({
+            data: { content: comment.trim(), ticketId, authorId: req.user.id }
+          });
+        }
+        if (reason && typeof reason === 'string' && ['Cancelled', 'Reopened'].includes(status)) {
           await tx.internalNote.create({
             data: { content: `${status} Reason: ${reason.trim()}`, ticketId, authorId: req.user.id }
           });
@@ -756,7 +1297,7 @@ Key architectural rules:
     }
     ```
 *   **Errors:**
-    *   `400 Bad Request`: Missing `lastUpdatedAt`, invalid transition, missing owner, missing cancellation reason, missing required comment, or Resolution Gate failure.
+    *   `400 Bad Request`: Missing or invalid `lastUpdatedAt`, invalid transition, missing owner on transitions requiring assignment ('New->Open', 'Open->In Progress', 'Reopened->In Progress'), missing/invalid cancellation reason, missing/invalid required comment for Waiting for Requester, or Resolution Gate failure (0 actions recorded).
     *   `401 Unauthorized`: Unauthenticated.
     *   `403 Forbidden`: Authenticated user is not IT Staff (Requesters and Administrators are denied per preserved Lab 3 baseline).
     *   `404 Not Found`: Ticket not found.
@@ -768,7 +1309,7 @@ Key architectural rules:
 *   **Permitted Roles:** `Requester` (for tickets they own), `IT Staff`. (Administrators denied with `403 Forbidden` per preserved Lab 3 baseline, as Section 4.3 is restricted to Actions Taken).
 *   **Headers:**
     *   `Content-Type: application/json`
-    *   `Idempotency-Key`: UUIDv4 string (**optional** on all POST endpoints; if omitted, request executes normally without deduplication).
+    *   `Idempotency-Key`: UUIDv4 string (**optional**; if omitted, request executes normally without deduplication).
 *   **Request Shape:**
     ```json
     {
@@ -777,20 +1318,36 @@ Key architectural rules:
     }
     ```
 *   **Validation Rules:**
-    *   `content`: String, required, trimmed, min 1 char.
-    *   `lastUpdatedAt`: ISO 8601 string, **mandatory** for concurrency validation. If omitted, returns `400 Bad Request` (`{ error: "lastUpdatedAt is required for concurrency validation." }`).
+    *   `content`: String, required. Must contain at least 1 non-whitespace character after trimming (`typeof content === 'string' && content.trim().length > 0`). Empty string, whitespace-only, non-string, or missing value returns `400 Bad Request`.
+    *   `lastUpdatedAt`: ISO 8601 string, **mandatory** for concurrency validation. Must pass `parseStrictIsoTimestamp`. If omitted, malformed, or invalid calendar date, returns `400 Bad Request` (`{ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." }`).
+    *   `Idempotency-Key`: UUIDv4 string, **optional**. If supplied, must match valid UUIDv4 format (`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`). If malformed, returns `400 Bad Request` (`{ error: "Invalid Idempotency-Key header format. Must be UUIDv4." }`).
+    *   *Validation Ordering Precedence:* All input validations execute **strictly before** any `IdempotencyKey` lookup, expired-key cleanup, reservation creation, or ticket mutation. Invalid requests return `400 Bad Request` without modifying state or reserving idempotency slots.
 *   **Comment-Driven Status Transitions & Transaction Atomicity Implementation Pattern:**
     ```typescript
     try {
-      let requestHash = '';
+      // 1. Upfront request validation before any IdempotencyKey lookup, pruning, or transaction
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        return res.status(400).json({ error: "content is required and cannot be empty or whitespace-only." });
+      }
+      const normalizedContent = content.trim();
+
+      const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+      if (!parsedLastUpdatedAt) {
+        return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
+      }
+
       if (idempotencyKey) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
           return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
         }
-        // Canonicalize payload: trim content, format timestamp, sort keys
+      }
+
+      // 2. Canonicalize payload and pre-lookup IdempotencyKey if provided
+      let requestHash = '';
+      if (idempotencyKey) {
         const canonicalPayload = {
-          content: content?.trim(),
-          lastUpdatedAt: lastUpdatedAt ? new Date(lastUpdatedAt).toISOString() : undefined
+          content: normalizedContent,
+          lastUpdatedAt: parsedLastUpdatedAt.toISOString()
         };
         requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
 
@@ -865,7 +1422,7 @@ Key architectural rules:
               where: {
                 id: ticketId,
                 status: 'Waiting for Requester',
-                updatedAt: new Date(lastUpdatedAt)
+                updatedAt: parsedLastUpdatedAt
               },
               data: { status: 'Open', updatedAt: new Date() }
             });
@@ -875,7 +1432,7 @@ Key architectural rules:
               where: {
                 id: ticketId,
                 status: ticket.status,
-                updatedAt: new Date(lastUpdatedAt)
+                updatedAt: parsedLastUpdatedAt
               },
               data: { status: 'Reopened', resolvedAt: null, updatedAt: new Date() }
             });
@@ -886,7 +1443,7 @@ Key architectural rules:
               where: {
                 id: ticketId,
                 status: ticket.status,
-                updatedAt: new Date(lastUpdatedAt)
+                updatedAt: parsedLastUpdatedAt
               },
               data: { updatedAt: new Date() }
             });
@@ -898,7 +1455,7 @@ Key architectural rules:
             where: {
               id: ticketId,
               status: ticket.status,
-              updatedAt: new Date(lastUpdatedAt)
+              updatedAt: parsedLastUpdatedAt
             },
             data: { updatedAt: new Date() }
           });
@@ -921,7 +1478,7 @@ Key architectural rules:
         // 5. Create PublicComment
         const comment = await tx.publicComment.create({
           data: {
-            content: content.trim(),
+            content: normalizedContent,
             ticketId,
             authorId: req.user.id
           },
@@ -1018,7 +1575,7 @@ Key architectural rules:
 *   **Permitted Roles:** `Requester` (for tickets they own).
 *   **Request Headers:**
     *   `Content-Type: application/json`
-    *   `Idempotency-Key`: UUIDv4 string (**optional** on all POST endpoints; if omitted, request executes normally without deduplication).
+    *   `Idempotency-Key`: UUIDv4 string (**optional**; if omitted, request executes normally without deduplication).
 *   **Request Shape:**
     ```json
     {
@@ -1026,18 +1583,33 @@ Key architectural rules:
     }
     ```
 *   **Validation Rules:**
-    *   `lastUpdatedAt`: ISO 8601 string, **mandatory** for concurrency validation. If omitted, returns `400 Bad Request` (`{ error: "lastUpdatedAt is required for concurrency validation." }`).
+    *   `lastUpdatedAt`: ISO 8601 string, **mandatory** for concurrency validation. Must pass `parseStrictIsoTimestamp` (defined in Section 1.1). Missing, malformed, non-strict ISO string (e.g. missing timezone designator, out-of-range calendar components such as Feb 30, non-zero padding), or non-string returns `400 Bad Request` (`{ error: "lastUpdatedAt is required and must be a valid ISO 8601 timestamp string." }`).
+    *   `Idempotency-Key` (header): Optional. If provided, must be a valid UUIDv4 string matching `/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`. Invalid format returns `400 Bad Request` (`{ error: "Invalid Idempotency-Key header format. Must be UUIDv4." }`).
+    *   All request validation is performed upfront before any IdempotencyKey pre-lookup, 24-hour expiration cleanup, or database transaction.
     *   Ticket status must be strictly `In Progress`. If in any other status, returns `400 Bad Request`.
 *   **Atomic Transaction & Idempotency Implementation Pattern:**
     ```typescript
     try {
-      let requestHash = '';
-      if (idempotencyKey) {
+      // 1. Upfront Request Validation (Enforced BEFORE any database lookup, pruning, or reservation)
+      let parsedLastUpdatedAt: Date;
+      try {
+        parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt, 'lastUpdatedAt');
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+      if (idempotencyKey !== undefined) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
           return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
         }
+      }
+
+      // 2. Pre-lookup & 24h expiration pruning if Idempotency-Key provided
+      let requestHash = '';
+      if (idempotencyKey) {
         const canonicalPayload = {
-          lastUpdatedAt: lastUpdatedAt ? new Date(lastUpdatedAt).toISOString() : undefined
+          lastUpdatedAt: parsedLastUpdatedAt.toISOString()
         };
         requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
 
@@ -1111,7 +1683,7 @@ Key architectural rules:
           where: {
             id: ticketId,
             status: 'In Progress',
-            updatedAt: new Date(lastUpdatedAt)
+            updatedAt: parsedLastUpdatedAt
           },
           data: { updatedAt: new Date() }
         });
@@ -1221,7 +1793,7 @@ Key architectural rules:
     *   If an `Idempotency-Key` was provided that matches a recorded advisory submission, the API safely returns the stored 201 response with header `Idempotency-Replayed: true` without appending duplicate comments.
 *   **Response Shape (201 Created):** Returns the created `PublicComment` object.
 *   **Errors:**
-    *   `400 Bad Request`: Missing `lastUpdatedAt`, ticket is not in `In Progress`, or invalid `Idempotency-Key` UUIDv4 format.
+    *   `400 Bad Request`: Missing or invalid `lastUpdatedAt` format (must be strict ISO 8601), ticket is not in `In Progress`, or invalid `Idempotency-Key` UUIDv4 format.
     *   `401 Unauthorized`: Unauthenticated.
     *   `403 Forbidden`: Non-requester role.
     *   `404 Not Found`: Ticket not found or unowned by the requester (non-enumeration).
@@ -1257,6 +1829,7 @@ Key architectural rules:
 | `/api/admin/users` | POST | Administrator | Create user account with unique email. |
 | `/api/admin/users/:id` | PATCH | Administrator | Edit profile, role, or active status (safeguards active). |
 | `/api/admin/users/:id/reset-password` | POST | Administrator | Reset user's password; forces change on next login. |
+| `/api/tickets/:id/actions/:actionId/revisions` | GET | Staff, Admin | Fetch append-only revision history of an Action Taken in chronological order (Requester receives 403 on own, 404 on unowned). |
 
 ### 5.1 Lab 4 RBAC Baseline & Explicit Authorization Changes from Lab 3
 Sprint 4 preserves the core role permissions established in Labs 1–3 while explicitly introducing authorized RBAC extensions to support administrative triage, supervision, and technical escalation:
@@ -1270,6 +1843,7 @@ Sprint 4 preserves the core role permissions established in Labs 1–3 while exp
 
 2.  **Explicit Lab 4 RBAC Finalization & Conservative Baseline:**
     *   **Actions Taken Management (`POST /api/tickets/:id/actions`, `PATCH /api/tickets/:id/actions/:actionId`):** Explicitly authorized for both `IT Staff` and `Administrator` per `SE+Lab+4.pdf` Page 1, Section 1 (*"IT Staff and Administrators can create and update Actions Taken for a Ticket;"*) and Page 2–3, Section 4.3 Table (*"Administrator: Perform IT Staff behavior and retain administrative access needed for support and testing."*).
+    *   **Action Taken Revision History (`GET /api/tickets/:id/actions/:actionId/revisions`):** Authorized for `IT Staff` and `Administrator`. Requesters receive `403 Forbidden` for tickets they own (and `404 Not Found` for unowned tickets), protecting internal revision details from requester exposure.
     *   **Direct Internal Notes (`POST /api/tickets/:id/notes`):** Restricted strictly to `IT Staff` (Administrators receive `403 Forbidden`), preserving the Lab 3 baseline per `SE+Lab+4.pdf` Page 1, Section 1 and Page 7, Section 8.5 regression mandates (*"all previous authentication, authorization, Requester, IT Staff, Administrator, comment, note, and attachment behavior continues to work;"*). System-generated internal audit notes produced as status-transition side effects (`Cancelled`, `Reopened`) remain permitted.
     *   **Workflow Transitions & Resolution Gate (`PATCH /api/staff/tickets/:id/status`):** Restricted strictly to `IT Staff`. In Lab 3, `server/src/app.ts` line 315 strictly enforced `if (user.role !== 'IT Staff') return res.status(403).json({ error: "Forbidden: Only IT Staff can update ticket status" })`. Because Section 4.3 is titled specifically *"Action Taken Roles and Responsibilities"*, its Administrator permission is interpreted strictly within Actions Taken scope, preserving the Lab 3 403 Forbidden restriction for Administrators on status transitions.
     *   **Public Comments Posting (`POST /api/tickets/:id/comments`):** Restricted to `Requester` (own tickets) and `IT Staff`. In Lab 3, `server/src/app.ts` line 606 strictly enforced `if (req.user!.role === 'Administrator') return res.status(403).json({ error: "Administrators cannot post comments" })`. Preserving earlier comment regression behavior per Page 1 Section 1 and Page 7 Section 8.5 retains this 403 Forbidden restriction for Administrators.
