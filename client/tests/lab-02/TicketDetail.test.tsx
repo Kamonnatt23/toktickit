@@ -25,13 +25,34 @@ const mockTicketWithAttachments = {
   ]
 };
 
+const mockTicketInProgress = {
+  ...mockTicket,
+  id: 3,
+  status: 'In Progress'
+};
+
 describe('TicketDetail', () => {
   beforeEach(() => {
     localStorage.setItem('dev_requester_user', JSON.stringify(mockUser));
     
     global.fetch = vi.fn((url: string, options: any) => {
-      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); } if (url.includes('/api/dev/users')) {
+      if (url.includes('/api/auth/me')) { return Promise.resolve({ ok: true, json: () => Promise.resolve(mockUser) }); }
+      if (url.includes('/api/dev/users')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([mockUser]) });
+      }
+      if (url.includes('/api/tickets/1/comments')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { id: 1, content: 'First public comment', createdAt: '2023-01-01T11:00:00.000Z', author: { id: 2, name: 'Support Agent', role: 'IT Staff' } }
+          ])
+        });
+      }
+      if (url.includes('/api/tickets/3/appears-resolved') && options?.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+      }
+      if (url.includes('/api/tickets/3/comments')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       }
       if (url.includes('/api/tickets/1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTicket) });
@@ -39,8 +60,17 @@ describe('TicketDetail', () => {
       if (url.includes('/api/tickets/2')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTicketWithAttachments) });
       }
+      if (url.includes('/api/tickets/3')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTicketInProgress) });
+      }
       if (url.includes('/api/tickets/99')) {
         return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'Ticket not found' }) });
+      }
+      if (url.includes('/comments')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes('/notes')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       }
       if (url.includes('/api/attachments') && options?.method === 'POST') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 102, fileName: 'new.png', fileSize: 100 }) });
@@ -164,5 +194,61 @@ describe('TicketDetail', () => {
     const backBtn = screen.getByText(/Back to My Tickets/i);
     fireEvent.click(backBtn);
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders Communication History, existing public comments, and comment textarea on Requester Ticket Detail', async () => {
+    render(<AuthProvider><TicketDetail ticketId={1} onBack={vi.fn()} /></AuthProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('Communication History')).toBeInTheDocument();
+      expect(screen.getByText('First public comment')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Type your message here...')).toBeInTheDocument();
+    });
+  });
+
+  it('renders Problem Appears Resolved button only when ticket status is In Progress', async () => {
+    // Ticket 1 has status 'New'
+    const { unmount } = render(<AuthProvider><TicketDetail ticketId={1} onBack={vi.fn()} /></AuthProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('My Issue')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /Problem Appears Resolved/i })).not.toBeInTheDocument();
+
+    unmount();
+
+    // Ticket 3 has status 'In Progress'
+    render(<AuthProvider><TicketDetail ticketId={3} onBack={vi.fn()} /></AuthProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Problem Appears Resolved/i })).toBeInTheDocument();
+    });
+  });
+
+  it('submits appears-resolved and invokes parent ticket refresh on click', async () => {
+    render(<AuthProvider><TicketDetail ticketId={3} onBack={vi.fn()} /></AuthProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Problem Appears Resolved/i })).toBeInTheDocument();
+    });
+
+    const initialFetchCount = (global.fetch as any).mock.calls.length;
+
+    const btn = screen.getByRole('button', { name: /Problem Appears Resolved/i });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/tickets/3/appears-resolved'),
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+    });
+
+    // Parent ticket refresh callback (fetchTicket) is invoked after success
+    await waitFor(() => {
+      const callsAfterClick = (global.fetch as any).mock.calls.slice(initialFetchCount);
+      const ticketRefreshCall = callsAfterClick.find((c: any[]) => c[0].endsWith('/api/tickets/3') && !c[0].includes('appears-resolved') && !c[0].includes('comments'));
+      expect(ticketRefreshCall).toBeDefined();
+    });
   });
 });

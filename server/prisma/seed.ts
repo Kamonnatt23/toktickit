@@ -4,7 +4,7 @@ import bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('password123', 10);
+  let defaultPasswordHash: string | null = null;
 
   const categories = [
     "Account and Access",
@@ -55,20 +55,25 @@ async function main() {
 
   const createdUsers = [];
   for (const user of users) {
+    const existing = await prisma.user.findUnique({ where: { email: user.email } });
+    if (existing) {
+      createdUsers.push(existing);
+      continue;
+    }
+
+    if (!defaultPasswordHash) {
+      defaultPasswordHash = await bcrypt.hash('password123', 10);
+    }
+
     const u = await prisma.user.upsert({
       where: { email: user.email },
-      update: { 
-        isActive: user.isActive, 
-        name: user.name, 
-        role: user.role,
-        passwordHash: passwordHash
-      },
+      update: {},
       create: {
         name: user.name,
         email: user.email,
         isActive: user.isActive,
         role: user.role,
-        passwordHash: passwordHash
+        passwordHash: defaultPasswordHash
       },
     });
     createdUsers.push(u);

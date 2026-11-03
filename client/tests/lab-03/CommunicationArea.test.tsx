@@ -22,7 +22,7 @@ describe('CommunicationArea Component', () => {
   });
 
   it('renders comments and allows posting for Requester', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 1, role: 'Requester' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 1, name: 'Requester User', email: 'requester@example.com', role: 'Requester', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
       render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);
@@ -42,7 +42,7 @@ describe('CommunicationArea Component', () => {
   });
 
   it('renders comments and notes and internal toggle for IT Staff', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 2, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 2, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
       render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);
@@ -58,7 +58,7 @@ describe('CommunicationArea Component', () => {
   });
 
   it('renders read-only for Administrator', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 3, role: 'Administrator' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 3, name: 'Admin User', email: 'admin@example.com', role: 'Administrator', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
       render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);

@@ -58,7 +58,7 @@ describe('StaffTicketDetail Component', () => {
   };
 
   it('renders read-only fields for IT Staff', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     setupMockFetch();
 
     await act(async () => {
@@ -71,7 +71,7 @@ describe('StaffTicketDetail Component', () => {
   });
 
   it('allows Claiming ticket', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     setupMockFetch();
 
     await act(async () => {
@@ -107,7 +107,7 @@ describe('StaffTicketDetail Component', () => {
   });
 
   it('prevents Administrator from seeing operational controls but allows viewing data', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 99, role: 'Administrator' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 99, name: 'Admin User', email: 'admin@example.com', role: 'Administrator', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     setupMockFetch();
 
     await act(async () => {
@@ -132,7 +132,7 @@ describe('StaffTicketDetail Component', () => {
   });
 
   it('shows required comment area for transitions', async () => {
-    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, role: 'IT Staff' }, isLoading: false, login: vi.fn(), logout: vi.fn() });
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     setupMockFetch({ ...mockTicket, status: 'In Progress', ownerId: 10 });
 
     await act(async () => {
