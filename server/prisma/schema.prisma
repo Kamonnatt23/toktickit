@@ -32,6 +32,8 @@ model User {
   sessions               Session[]
   publicComments         PublicComment[]
   internalNotes          InternalNote[]
+  actionsPerformed       ActionTaken[]          @relation("ActionPerformer")
+  editedActionRevisions  ActionTakenRevision[]  @relation("ActionRevisionEditor")
 
   // Prisma model is named User, physical PostgreSQL table remains "RequesterUser"
   // This is intentional to reuse the populated Lab 2 table and preserve existing data/relations.
@@ -81,6 +83,8 @@ model Ticket {
   requesterId     Int
   ownerId         Int?          // Primary IT Staff owner
   createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt @default(now())
+  resolvedAt      DateTime?
 
   category        Category      @relation(fields: [categoryId], references: [id])
   relatedSystem   RelatedSystem @relation(fields: [relatedSystemId], references: [id])
@@ -89,6 +93,7 @@ model Ticket {
   attachments     Attachment[]
   publicComments  PublicComment[]
   internalNotes   InternalNote[]
+  actionsTaken    ActionTaken[]
 }
 
 model Attachment {
@@ -125,4 +130,57 @@ model InternalNote {
 
   ticket    Ticket   @relation(fields: [ticketId], references: [id])
   author    User     @relation(fields: [authorId], references: [id])
+}
+
+model ActionTaken {
+  id                Int                   @id @default(autoincrement())
+  ticketId          Int
+  actionDateTime    DateTime              @default(now())
+  actionDescription String
+  result            String
+  performedById     Int
+  followUpRequired  Boolean               @default(false)
+  followUpNote      String?
+  attachmentNotes   String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt @default(now())
+
+  // Relations: Protect audit history with onDelete: Restrict
+  ticket            Ticket                @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  performedBy       User                  @relation("ActionPerformer", fields: [performedById], references: [id], onDelete: Restrict)
+  revisions         ActionTakenRevision[]
+
+  @@index([ticketId])
+  @@index([performedById])
+}
+
+model ActionTakenRevision {
+  id             String      @id @default(uuid())
+  actionTakenId  Int
+  editedById     Int
+  editedAt       DateTime    @default(now())
+  beforeSnapshot Json        // Complete snapshot of editable fields prior to modification
+  afterSnapshot  Json        // Complete snapshot of editable fields after modification
+
+  actionTaken    ActionTaken @relation(fields: [actionTakenId], references: [id], onDelete: Restrict)
+  editedBy       User        @relation("ActionRevisionEditor", fields: [editedById], references: [id], onDelete: Restrict)
+
+  @@index([actionTakenId, editedAt])
+  @@index([editedById])
+}
+
+model IdempotencyKey {
+  id           Int      @id @default(autoincrement())
+  key          String   // UUIDv4 provided by client
+  route        String   // e.g. "POST /api/tickets/:id/actions"
+  ticketId     Int
+  userId       Int
+  requestHash  String   // SHA-256 hash of canonical request body
+  statusCode   Int?     // Stored HTTP response status code (null while in-flight reservation)
+  responseBody String?  // Serialized response JSON payload (null while in-flight reservation)
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime // createdAt + 24 hours
+
+  @@unique([route, ticketId, userId, key])
+  @@index([expiresAt])
 }
