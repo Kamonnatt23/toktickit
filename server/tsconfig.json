@@ -5,9 +5,10 @@
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "strict": true,
+    "rootDir": "src",
     "outDir": "dist",
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "prisma", "tests"]
+  "include": ["src"]
 }
