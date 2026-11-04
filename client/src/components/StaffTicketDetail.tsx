@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
 import { CommunicationArea } from './CommunicationArea';
+import { ActionsTaken } from './ActionsTaken';
 
 interface StaffTicketDetailProps {
   ticketId: number;
@@ -198,7 +199,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
             </div>
             
             {ticket.attachments && ticket.attachments.length > 0 && (
-              <div className="bg-white p-4 rounded shadow-sm border">
+              <div className="bg-white p-4 rounded shadow-sm border mb-4">
                 <h6 className="text-muted fw-bold mb-3 text-uppercase" style={{ fontSize: '0.85rem', letterSpacing: '0.5px' }}>Attachments</h6>
                 <ul className="list-group list-group-flush">
                   {ticket.attachments.filter((a: any) => !a.isDeleted).map((att: any) => (
@@ -214,6 +215,8 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
               </div>
             )}
             
+            <ActionsTaken ticketId={ticket.id} onTicketUpdated={fetchTicket} />
+
             <CommunicationArea ticketId={ticket.id} ticketStatus={ticket.status} onUpdate={fetchTicket} />
           </div>
           
