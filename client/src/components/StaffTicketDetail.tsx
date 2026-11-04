@@ -113,6 +113,7 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
   }, [fetchTicket, fetchStaffUsers, fetchActionsCount]);
 
   const handleAssign = async (ownerId: number | null) => {
+    if (assigning || !ticket?.updatedAt) return;
     setAssigning(true);
     setError('');
     setSuccessMsg('');
@@ -122,10 +123,19 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ ownerId })
+        body: JSON.stringify({
+          ownerId,
+          lastUpdatedAt: ticket.updatedAt
+        })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to assign ticket');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket state was modified in another session. Please reload the latest ticket data and try again.');
+        }
+        throw new Error(data.error || 'Failed to assign ticket');
+      }
       setSuccessMsg('Ticket assigned successfully');
       await fetchTicket();
     } catch (err: any) {

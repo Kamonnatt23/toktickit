@@ -26,7 +26,8 @@ const mockTicket = {
   requester: { name: 'Bob', email: 'bob@example.com' },
   category: { name: 'Hardware' },
   relatedSystem: { name: 'Laptop' },
-  attachments: []
+  attachments: [],
+  updatedAt: '2026-11-04T12:00:00.000Z'
 };
 
 const mockStaff = [
@@ -70,7 +71,7 @@ describe('StaffTicketDetail Component', () => {
     expect(screen.getByText('Bob')).toBeDefined();
   });
 
-  it('allows Claiming ticket', async () => {
+  it('allows Claiming ticket and sends ownerId with latest ticket.updatedAt', async () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     setupMockFetch();
 
@@ -91,12 +92,14 @@ describe('StaffTicketDetail Component', () => {
       fireEvent.click(claimBtn);
     });
 
+    // 1. handleAssign sends ownerId and current ticket.updatedAt
     expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assign'), expect.objectContaining({
       method: 'PATCH',
-      body: JSON.stringify({ ownerId: 10 })
+      body: JSON.stringify({ ownerId: 10, lastUpdatedAt: mockTicket.updatedAt })
     }));
 
-    // Verify refetch was called
+    // 2. Successful assignment displays success and reloads Ticket data
+    expect(screen.getByText('Ticket assigned successfully')).toBeDefined();
     expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/tickets/1'), expect.objectContaining({
       credentials: 'include'
     }));
@@ -104,6 +107,89 @@ describe('StaffTicketDetail Component', () => {
     // Verify related data is still rendered
     expect(screen.getByText('Bob')).toBeDefined();
     expect(screen.getByText('Hardware')).toBeDefined();
+  });
+
+  it('allows Reassigning and Unassigning via dropdown controls', async () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
+    setupMockFetch({ ...mockTicket, ownerId: 10, owner: { id: 10, name: 'Active Staff' } });
+
+    await act(async () => {
+      render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
+    });
+
+    const selects = screen.getAllByRole('combobox');
+    const assigneeSelect = selects[1]; // 0: IT Priority, 1: Assignee, 2: Status
+
+    // Mock assign API call for unassign
+    (global.fetch as any).mockImplementationOnce(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ ...mockTicket, ownerId: null })
+    }));
+
+    await act(async () => {
+      fireEvent.change(assigneeSelect, { target: { value: '' } });
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assign'), expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ ownerId: null, lastUpdatedAt: mockTicket.updatedAt })
+    }));
+
+    // Mock assign API call for reassign to staff id 10
+    (global.fetch as any).mockImplementationOnce(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ ...mockTicket, ownerId: 10, owner: { name: 'Active Staff' } })
+    }));
+
+    await act(async () => {
+      fireEvent.change(assigneeSelect, { target: { value: '10' } });
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assign'), expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ ownerId: 10, lastUpdatedAt: mockTicket.updatedAt })
+    }));
+  });
+
+  it('handles 409 Conflict: displays Concurrency Notice, does not show success, does not overwrite owner, and Reload fetches fresh ticket', async () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 10, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
+    setupMockFetch();
+
+    await act(async () => {
+      render(<StaffTicketDetail ticketId={1} onBack={vi.fn()} />);
+    });
+
+    const claimBtn = await screen.findByText('Claim Ticket');
+
+    // Mock 409 Conflict response
+    (global.fetch as any).mockImplementationOnce(() => Promise.resolve({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({ error: 'Ticket was modified by another session. Please reload the latest ticket data and try again.' })
+    }));
+
+    await act(async () => {
+      fireEvent.click(claimBtn);
+    });
+
+    // 3. Displays existing Concurrency Notice
+    expect(screen.getByText('Concurrency Notice:')).toBeDefined();
+    expect(screen.getByText(/Ticket was modified by another session/)).toBeDefined();
+
+    // 5. Does not display success message or overwrite current owner
+    expect(screen.queryByText('Ticket assigned successfully')).toBeNull();
+    expect(screen.getByText('-- Unassigned --')).toBeDefined();
+
+    // 4. Reload Latest Data fetches fresh ticket from server and dismisses notice
+    const reloadBtn = screen.getByText('Reload Latest Data');
+    await act(async () => {
+      fireEvent.click(reloadBtn);
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/tickets/1'), expect.objectContaining({
+      credentials: 'include'
+    }));
+    expect(screen.queryByText('Concurrency Notice:')).toBeNull();
   });
 
   it('prevents Administrator from seeing operational controls but allows viewing data', async () => {

@@ -289,9 +289,18 @@ app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res
       return res.status(400).json({ error: "Invalid ticket ID" });
     }
 
-    const { ownerId } = req.body;
+    const { ownerId, lastUpdatedAt } = req.body;
     if (ownerId !== null && ownerId !== undefined && typeof ownerId !== 'number') {
       return res.status(400).json({ error: "Invalid ownerId format" });
+    }
+
+    if (!lastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
+    }
+
+    const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+    if (!parsedLastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
     const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
@@ -306,12 +315,42 @@ app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res
       }
     }
 
-    const updatedTicket = await getPrisma().ticket.update({
-      where: { id: ticketId },
-      data: { ownerId: ownerId === undefined ? ticket.ownerId : ownerId }
+    const updateResult = await getPrisma().ticket.updateMany({
+      where: {
+        id: ticketId,
+        updatedAt: parsedLastUpdatedAt
+      },
+      data: {
+        ownerId: ownerId === undefined ? ticket.ownerId : ownerId,
+        updatedAt: new Date()
+      }
     });
 
-    return res.status(200).json(updatedTicket);
+    if (updateResult.count === 0) {
+      const currentTicket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+      if (!currentTicket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      return res.status(409).json({
+        error: "Ticket was modified by another session. Please reload the latest ticket data and try again."
+      });
+    }
+
+    const updatedTicket = await getPrisma().ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: { select: { id: true, name: true, email: true, role: true } },
+        owner: { select: { id: true, name: true, email: true, role: true } },
+        attachments: true
+      }
+    });
+
+    return res.status(200).json({
+      ...updatedTicket,
+      ticketNumber: `TKT-${String(updatedTicket!.id).padStart(3, '0')}`
+    });
   } catch (err) {
     console.error("Error assigning ticket:", err);
     return res.status(500).json({ error: "Internal server error" });
