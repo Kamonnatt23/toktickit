@@ -25,7 +25,7 @@ describe('CommunicationArea Component', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 1, name: 'Requester User', email: 'requester@example.com', role: 'Requester', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
-      render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);
+      render(<CommunicationArea ticketId={1} ticketStatus="New" lastUpdatedAt="2026-11-01T10:00:00.000Z" onUpdate={vi.fn()} />);
     });
 
     // Should see public comment
@@ -45,7 +45,7 @@ describe('CommunicationArea Component', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 2, name: 'Staff User', email: 'staff@example.com', role: 'IT Staff', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
-      render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);
+      render(<CommunicationArea ticketId={1} ticketStatus="New" lastUpdatedAt="2026-11-01T10:00:00.000Z" onUpdate={vi.fn()} />);
     });
 
     expect(screen.getByText('Public comment')).toBeDefined();
@@ -61,7 +61,7 @@ describe('CommunicationArea Component', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({ user: { id: 3, name: 'Admin User', email: 'admin@example.com', role: 'Administrator', requiresPasswordChange: false }, isLoading: false, setUser: vi.fn(), logout: vi.fn(), refreshUser: vi.fn() });
     
     await act(async () => {
-      render(<CommunicationArea ticketId={1} ticketStatus="New" onUpdate={vi.fn()} />);
+      render(<CommunicationArea ticketId={1} ticketStatus="New" lastUpdatedAt="2026-11-01T10:00:00.000Z" onUpdate={vi.fn()} />);
     });
 
     expect(screen.getByText('Public comment')).toBeDefined();

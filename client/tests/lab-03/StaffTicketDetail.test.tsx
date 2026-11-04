@@ -145,7 +145,7 @@ describe('StaffTicketDetail Component', () => {
     const statusSelect = selects[2]; // 0: IT Priority, 1: Assignee, 2: Status
 
     await act(async () => {
-      fireEvent.change(statusSelect, { target: { value: 'Resolved' } });
+      fireEvent.change(statusSelect, { target: { value: 'Waiting for Requester' } });
     });
 
     // Should show text area

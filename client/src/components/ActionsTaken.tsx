@@ -46,6 +46,7 @@ export interface ActionTakenRevision {
 interface ActionsTakenProps {
   ticketId: number;
   onTicketUpdated?: () => void;
+  onActionsLoaded?: (count: number) => void;
 }
 
 export function generateUUID(): string {
@@ -1017,7 +1018,7 @@ export function RevisionHistoryModal({ ticketId, actionId, isOpen, onClose }: Re
   );
 }
 
-export function ActionsTaken({ ticketId, onTicketUpdated }: ActionsTakenProps) {
+export function ActionsTaken({ ticketId, onTicketUpdated, onActionsLoaded }: ActionsTakenProps) {
   const { user } = useAuth();
   const canManageActions = user?.role === 'IT Staff' || user?.role === 'Administrator';
 
@@ -1046,8 +1047,10 @@ export function ActionsTaken({ ticketId, onTicketUpdated }: ActionsTakenProps) {
             return diff !== 0 ? diff : a.id - b.id;
           });
           setActions(data);
+          onActionsLoaded?.(data.length);
         } else {
           setActions([]);
+          onActionsLoaded?.(0);
         }
       } else {
         const errData = await response.json().catch(() => ({}));
@@ -1098,6 +1101,7 @@ export function ActionsTaken({ ticketId, onTicketUpdated }: ActionsTakenProps) {
         {canManageActions && (
           <button
             type="button"
+            data-testid="add-action-taken-btn"
             className="btn btn-sm text-white fw-bold d-flex align-items-center gap-1"
             style={{ backgroundColor: '#006B3C', borderRadius: '50rem' }}
             onClick={() => setIsCreateOpen(true)}
