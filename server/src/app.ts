@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes.js";
 import attachmentsRouter from "./attachments.js";
+import actionsRouter from "./routes/actions.routes.js";
 import { requireAuth, AuthenticatedRequest } from "./middleware/auth.middleware.js";
 
 let prisma: PrismaClient;
@@ -28,6 +29,7 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/attachments", attachmentsRouter);
+app.use("/api", actionsRouter);
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("TokTickIT API is running! Access /api/health to check status.");
