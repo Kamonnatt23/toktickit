@@ -708,7 +708,174 @@ describe('ActionsTaken Component & Modals (Issue #57 / Lab 4)', () => {
   // Modal Accessibility: Escape key and focus trap
   // --------------------------------------------------------------------------
   describe('Modal Accessibility: Escape key and focus trap', () => {
-    it('closes create modal on Escape key press', async () => {
+    function createDeferred<T>() {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: any) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    it('prevents Escape dismissal while Create form submission is in-flight and preserves form state and key', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: mockStaffUser,
+        isLoading: false,
+        setUser: vi.fn(),
+        logout: vi.fn(),
+        refreshUser: vi.fn()
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      });
+
+      await act(async () => {
+        render(<ActionsTaken ticketId={1} />);
+      });
+
+      // 1. Open Create Modal
+      fireEvent.click(screen.getByText('+ Add Action Taken'));
+      expect(screen.getByText('Log Action Taken')).toBeDefined();
+
+      // 2. Fill required fields
+      const descInput = screen.getByPlaceholderText('Describe the technical action performed...');
+      const resultInput = screen.getByPlaceholderText('Describe the observed result or outcome...');
+      fireEvent.change(descInput, { target: { value: 'In-flight Escape action test' } });
+      fireEvent.change(resultInput, { target: { value: 'In-flight Escape result test' } });
+
+      // 3. Submit form with pending Promise
+      const deferredPost = createDeferred<any>();
+      mockFetch.mockReturnValueOnce(deferredPost.promise);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Action Taken'));
+      });
+
+      // 4. Verify isSubmitting behavior through spinner & disabled button
+      expect(screen.getByText('Saving Action Taken...')).toBeDefined();
+      const submitBtn = screen.getByRole('button', { name: /saving action taken/i });
+      expect(submitBtn.hasAttribute('disabled')).toBe(true);
+
+      const postCallsBeforeEscape = mockFetch.mock.calls.filter(c => c[1]?.method === 'POST');
+      expect(postCallsBeforeEscape.length).toBe(1);
+      const originalKey = postCallsBeforeEscape[0][1].headers['Idempotency-Key'];
+      expect(originalKey).toBeDefined();
+
+      // 5. Press Escape while POST request is still pending
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+      });
+
+      // 6. Assertions while in-flight:
+      // - Create modal remains visible
+      expect(screen.getByText('Log Action Taken')).toBeDefined();
+      // - Form values are preserved
+      expect((descInput as HTMLTextAreaElement).value).toBe('In-flight Escape action test');
+      expect((resultInput as HTMLTextAreaElement).value).toBe('In-flight Escape result test');
+      // - No additional POST request was triggered
+      const postCallsAfterEscape = mockFetch.mock.calls.filter(c => c[1]?.method === 'POST');
+      expect(postCallsAfterEscape.length).toBe(1);
+      // - Original Idempotency-Key has not been replaced or regenerated
+      expect(postCallsAfterEscape[0][1].headers['Idempotency-Key']).toBe(originalKey);
+
+      // 7. Resolve the pending request successfully
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      });
+
+      await act(async () => {
+        deferredPost.resolve({
+          ok: true,
+          json: async () => ({ id: 50, actionDescription: 'In-flight Escape action test' })
+        });
+      });
+
+      // 8. Verify existing successful-submission flow closes modal normally
+      await waitFor(() => {
+        expect(screen.queryByText('Log Action Taken')).toBeNull();
+      });
+    });
+
+    it('prevents Escape dismissal while Edit form submission is in-flight and preserves draft values', async () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: mockStaffUser,
+        isLoading: false,
+        setUser: vi.fn(),
+        logout: vi.fn(),
+        refreshUser: vi.fn()
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [mockActionsList[0]]
+      });
+
+      await act(async () => {
+        render(<ActionsTaken ticketId={1} />);
+      });
+
+      // 1. Open Edit Modal
+      fireEvent.click(screen.getByLabelText('Edit Action Taken'));
+      expect(screen.getByText('Edit Action Taken')).toBeDefined();
+
+      // 2. Modify at least one editable field
+      const descInput = screen.getByPlaceholderText('Describe the technical action performed...');
+      fireEvent.change(descInput, { target: { value: 'Modified while pending escape test' } });
+
+      // 3. Submit form with pending Promise
+      const deferredPatch = createDeferred<any>();
+      mockFetch.mockReturnValueOnce(deferredPatch.promise);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Changes'));
+      });
+
+      // Verify submitting state
+      expect(screen.getByText('Saving Changes...')).toBeDefined();
+
+      const patchCallsBeforeEscape = mockFetch.mock.calls.filter(c => c[1]?.method === 'PATCH');
+      expect(patchCallsBeforeEscape.length).toBe(1);
+
+      // 4. Press Escape while PATCH request is still pending
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+      });
+
+      // 5. Assertions while in-flight:
+      // - Edit modal remains visible
+      expect(screen.getByText('Edit Action Taken')).toBeDefined();
+      // - Edited draft values are preserved
+      expect((descInput as HTMLTextAreaElement).value).toBe('Modified while pending escape test');
+      // - Original performer remains unchanged
+      expect(screen.getByText(/Originally recorded by: Alice Staff \(IT Staff\)/)).toBeDefined();
+      // - No additional PATCH request was triggered
+      const patchCallsAfterEscape = mockFetch.mock.calls.filter(c => c[1]?.method === 'PATCH');
+      expect(patchCallsAfterEscape.length).toBe(1);
+
+      // 6. Resolve pending PATCH request successfully
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      });
+
+      await act(async () => {
+        deferredPatch.resolve({
+          ok: true,
+          json: async () => ({ ...mockActionsList[0], actionDescription: 'Modified while pending escape test' })
+        });
+      });
+
+      // 7. Verify existing successful-submission flow closes modal normally
+      await waitFor(() => {
+        expect(screen.queryByText('Edit Action Taken')).toBeNull();
+      });
+    });
+
+    it('closes create modal on Escape key press when not submitting', async () => {
       vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
         user: mockStaffUser,
         isLoading: false,
@@ -735,7 +902,7 @@ describe('ActionsTaken Component & Modals (Issue #57 / Lab 4)', () => {
       expect(screen.queryByText('Log Action Taken')).toBeNull();
     });
 
-    it('closes edit modal on Escape key press', async () => {
+    it('closes edit modal on Escape key press when not submitting', async () => {
       vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
         user: mockStaffUser,
         isLoading: false,

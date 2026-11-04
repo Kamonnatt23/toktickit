@@ -92,9 +92,14 @@ export function formatDisplayDateTime(isoStr: string): string {
 function useModalAccessibility(
   isOpen: boolean,
   onClose: () => void,
-  modalRef: React.RefObject<HTMLDivElement>
+  modalRef: React.RefObject<HTMLDivElement>,
+  isSubmitting: boolean = false
 ) {
   const previousActiveElement = useRef<HTMLElement | null>(null);
+  const isSubmittingRef = useRef(isSubmitting);
+  isSubmittingRef.current = isSubmitting;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (isOpen) {
@@ -102,8 +107,12 @@ function useModalAccessibility(
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
+          if (isSubmittingRef.current) {
+            e.preventDefault();
+            return;
+          }
           e.preventDefault();
-          onClose();
+          onCloseRef.current();
           return;
         }
 
@@ -178,7 +187,7 @@ export function CreateActionModal({ ticketId, isOpen, onClose, onSuccess }: Crea
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
-  useModalAccessibility(isOpen, onClose, modalRef);
+  useModalAccessibility(isOpen, onClose, modalRef, isSubmitting);
 
   if (!isOpen) return null;
 
@@ -461,7 +470,7 @@ export function EditActionModal({
   const [error, setError] = useState<string>('');
   const [isConflict, setIsConflict] = useState<boolean>(false);
 
-  useModalAccessibility(isOpen, onClose, modalRef);
+  useModalAccessibility(isOpen, onClose, modalRef, isSubmitting);
 
   if (!isOpen) return null;
 
