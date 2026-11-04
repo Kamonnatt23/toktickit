@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
 import { CommunicationArea } from './CommunicationArea';
 import { ActionsTaken } from './ActionsTaken';
@@ -11,21 +11,23 @@ interface StaffTicketDetailProps {
 const TRANSITION_MATRIX: Record<string, string[]> = {
   'New': ['Open', 'Cancelled'],
   'Open': ['In Progress', 'Waiting for Requester'],
-  'Waiting for Requester': ['Open', 'In Progress'],
+  'Waiting for Requester': ['In Progress', 'Open'],
   'In Progress': ['Resolved', 'Waiting for Requester'],
   'Resolved': ['Closed'],
   'Closed': ['Reopened'],
+  'Reopened': ['In Progress', 'Open', 'Waiting for Requester'],
   'Cancelled': []
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  'New': 'bg-info text-dark',
-  'Open': 'bg-primary',
-  'In Progress': 'bg-warning text-dark',
-  'Waiting for Requester': 'bg-secondary',
-  'Resolved': 'bg-success',
-  'Closed': 'bg-dark',
-  'Cancelled': 'bg-danger'
+  'New': 'bg-primary text-white',
+  'Open': 'bg-primary text-white',
+  'In Progress': 'bg-info text-dark',
+  'Waiting for Requester': 'bg-warning text-dark',
+  'Resolved': 'bg-success text-white',
+  'Closed': 'bg-secondary text-white',
+  'Reopened': 'bg-danger text-white',
+  'Cancelled': 'bg-dark text-white'
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -42,6 +44,8 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isConflict, setIsConflict] = useState(false);
+  const [actionCount, setActionCount] = useState<number>(0);
   
   // Operation states
   const [assigning, setAssigning] = useState(false);
@@ -71,6 +75,22 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
     }
   }, [ticketId, user, API_URL]);
 
+  const fetchActionsCount = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/tickets/${ticketId}/actions`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setActionCount(data.length);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch actions count', err);
+    }
+  }, [ticketId, API_URL]);
+
   const fetchStaffUsers = useCallback(async () => {
     if (!user) return;
     try {
@@ -89,21 +109,33 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
   useEffect(() => {
     fetchTicket();
     fetchStaffUsers();
-  }, [fetchTicket, fetchStaffUsers]);
+    fetchActionsCount();
+  }, [fetchTicket, fetchStaffUsers, fetchActionsCount]);
 
   const handleAssign = async (ownerId: number | null) => {
+    if (assigning || !ticket?.updatedAt) return;
     setAssigning(true);
     setError('');
     setSuccessMsg('');
+    setIsConflict(false);
     try {
       const res = await fetch(`${API_URL}/api/staff/tickets/${ticketId}/assign`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ ownerId })
+        body: JSON.stringify({
+          ownerId,
+          lastUpdatedAt: ticket.updatedAt
+        })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to assign ticket');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket state was modified in another session. Please reload the latest ticket data and try again.');
+        }
+        throw new Error(data.error || 'Failed to assign ticket');
+      }
       setSuccessMsg('Ticket assigned successfully');
       await fetchTicket();
     } catch (err: any) {
@@ -117,9 +149,13 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
     setUpdatingStatus(true);
     setError('');
     setSuccessMsg('');
+    setIsConflict(false);
     try {
-      const payload: any = { status: pendingStatus };
-      if (pendingStatus === 'Cancelled') payload.reason = transitionReason;
+      const payload: any = {
+        status: pendingStatus,
+        lastUpdatedAt: ticket.updatedAt
+      };
+      if (['Cancelled', 'Reopened'].includes(pendingStatus)) payload.reason = transitionReason;
       if (['Waiting for Requester', 'Resolved'].includes(pendingStatus)) payload.comment = transitionComment;
 
       const res = await fetch(`${API_URL}/api/staff/tickets/${ticketId}/status`, {
@@ -129,9 +165,16 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update status');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket state was modified in another session. Your draft comment / reason has been preserved.');
+        }
+        throw new Error(data.error || 'Failed to update status');
+      }
       setSuccessMsg('Status updated successfully');
       await fetchTicket();
+      await fetchActionsCount();
       setTransitionComment('');
       setTransitionReason('');
     } catch (err: any) {
@@ -144,15 +187,22 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
   const handlePriorityUpdate = async (itPriority: string) => {
     setError('');
     setSuccessMsg('');
+    setIsConflict(false);
     try {
       const res = await fetch(`${API_URL}/api/staff/tickets/${ticketId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ itPriority })
+        body: JSON.stringify({ itPriority, lastUpdatedAt: ticket.updatedAt })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update priority');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket state was modified in another session. Your draft comment / reason has been preserved.');
+        }
+        throw new Error(data.error || 'Failed to update priority');
+      }
       setSuccessMsg('Priority updated successfully');
       await fetchTicket();
     } catch (err: any) {
@@ -166,9 +216,34 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
 
   const isStaff = user?.role === 'IT Staff';
   const allowedTransitions = TRANSITION_MATRIX[ticket.status] || [];
-  const requiresReason = pendingStatus === 'Cancelled' && ticket.status === 'New';
-  const requiresComment = ['Waiting for Requester', 'Resolved'].includes(pendingStatus) && pendingStatus !== ticket.status;
-  const isTransitionValid = pendingStatus !== ticket.status;
+  const isTransitionValid = pendingStatus !== ticket.status && allowedTransitions.includes(pendingStatus);
+
+  // Exact source-target owner requirement check
+  const ownerRequired = Boolean(
+    !ticket.ownerId && (
+      (ticket.status === 'New' && pendingStatus === 'Open') ||
+      (ticket.status === 'Open' && pendingStatus === 'In Progress') ||
+      (ticket.status === 'Reopened' && pendingStatus === 'In Progress')
+    )
+  );
+
+  // Resolution Gate validation (action count >= 1 is the sole mandatory condition)
+  const isResolving = pendingStatus === 'Resolved';
+  const isResolutionGateBlocked = isResolving && actionCount === 0;
+
+  // Reason & comment requirements
+  const requiresReason = isTransitionValid && (
+    (pendingStatus === 'Cancelled' && ticket.status === 'New') ||
+    (pendingStatus === 'Reopened' && ticket.status === 'Closed')
+  );
+  const requiresComment = isTransitionValid && pendingStatus === 'Waiting for Requester';
+
+  const isSubmitDisabled =
+    updatingStatus ||
+    ownerRequired ||
+    isResolutionGateBlocked ||
+    (requiresReason && !transitionReason.trim()) ||
+    (requiresComment && !transitionComment.trim());
 
   return (
     <div className="card shadow-sm border-0">
@@ -188,8 +263,38 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
       </div>
 
       <div className="card-body p-4 bg-light">
-        {error && <div className="alert alert-danger alert-dismissible"><button type="button" className="btn-close" onClick={() => setError('')}></button>{error}</div>}
-        {successMsg && <div className="alert alert-success alert-dismissible"><button type="button" className="btn-close" onClick={() => setSuccessMsg('')}></button>{successMsg}</div>}
+        {error && !isConflict && (
+          <div className="alert alert-danger alert-dismissible">
+            <button type="button" className="btn-close" onClick={() => setError('')}></button>
+            {error}
+          </div>
+        )}
+        {isConflict && (
+          <div className="alert alert-warning py-3 px-4 d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <strong>Concurrency Notice: </strong>
+              <span>{error || 'Ticket state was modified in another session. Your draft comment / reason has been preserved.'}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-dark text-nowrap ms-3"
+              onClick={async () => {
+                setIsConflict(false);
+                setError('');
+                await fetchTicket();
+                await fetchActionsCount();
+              }}
+            >
+              Reload Latest Data
+            </button>
+          </div>
+        )}
+        {successMsg && (
+          <div className="alert alert-success alert-dismissible">
+            <button type="button" className="btn-close" onClick={() => setSuccessMsg('')}></button>
+            {successMsg}
+          </div>
+        )}
 
         <div className="row g-4">
           <div className="col-md-8">
@@ -215,9 +320,24 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
               </div>
             )}
             
-            <ActionsTaken ticketId={ticket.id} onTicketUpdated={fetchTicket} />
+            <ActionsTaken
+              ticketId={ticket.id}
+              onTicketUpdated={async () => {
+                await fetchTicket();
+                await fetchActionsCount();
+              }}
+              onActionsLoaded={(count) => setActionCount(count)}
+            />
 
-            <CommunicationArea ticketId={ticket.id} ticketStatus={ticket.status} onUpdate={fetchTicket} />
+            <CommunicationArea
+              ticketId={ticket.id}
+              ticketStatus={ticket.status}
+              lastUpdatedAt={ticket.updatedAt}
+              onUpdate={async () => {
+                await fetchTicket();
+                await fetchActionsCount();
+              }}
+            />
           </div>
           
           <div className="col-md-4">
@@ -244,7 +364,11 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
               <div className="mb-3 pb-3 border-bottom">
                 <label className="text-muted small fw-bold d-block mb-1">IT Priority</label>
                 {isStaff ? (
-                  <select className="form-select form-select-sm" value={ticket.itPriority} onChange={(e) => handlePriorityUpdate(e.target.value)}>
+                  <select
+                    className="form-select form-select-sm"
+                    value={ticket.itPriority}
+                    onChange={(e) => handlePriorityUpdate(e.target.value)}
+                  >
                     <option value="Low">Low</option>
                     <option value="Medium">Medium</option>
                     <option value="High">High</option>
@@ -260,7 +384,12 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
                 {isStaff ? (
                   <div>
                     <div className="d-flex mb-2">
-                      <select className="form-select form-select-sm me-2" value={ticket.ownerId || ''} onChange={(e) => handleAssign(e.target.value ? parseInt(e.target.value) : null)} disabled={assigning}>
+                      <select
+                        className="form-select form-select-sm me-2"
+                        value={ticket.ownerId || ''}
+                        onChange={(e) => handleAssign(e.target.value ? parseInt(e.target.value) : null)}
+                        disabled={assigning}
+                      >
                         <option value="">-- Unassigned --</option>
                         {staffUsers.map(u => (
                           <option key={u.id} value={u.id}>{u.name} {u.id === user.id ? '(Me)' : ''}</option>
@@ -268,7 +397,13 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
                       </select>
                     </div>
                     {!ticket.ownerId && (
-                      <button className="btn btn-sm btn-outline-success w-100" onClick={() => handleAssign(user.id)} disabled={assigning}>Claim Ticket</button>
+                      <button
+                        className="btn btn-sm btn-outline-success w-100"
+                        onClick={() => handleAssign(user.id)}
+                        disabled={assigning}
+                      >
+                        Claim Ticket
+                      </button>
                     )}
                   </div>
                 ) : (
@@ -279,27 +414,107 @@ export function StaffTicketDetail({ ticketId, onBack }: StaffTicketDetailProps) 
               {isStaff && allowedTransitions.length > 0 && (
                 <div className="mb-3">
                   <label className="text-muted small fw-bold d-block mb-1">Update Status</label>
-                  <select className="form-select form-select-sm mb-2" value={pendingStatus} onChange={(e) => setPendingStatus(e.target.value)} disabled={updatingStatus}>
+                  <select
+                    className="form-select form-select-sm mb-2"
+                    value={pendingStatus}
+                    onChange={(e) => setPendingStatus(e.target.value)}
+                    disabled={updatingStatus}
+                    aria-label="Update ticket status"
+                  >
                     <option value={ticket.status}>{ticket.status} (Current)</option>
                     {allowedTransitions.map(st => (
                       <option key={st} value={st}>{st}</option>
                     ))}
                   </select>
                   
-                  {isTransitionValid && requiresReason && (
-                    <div className="mb-2">
-                      <textarea className="form-control form-control-sm" placeholder="Cancellation reason (required)" value={transitionReason} onChange={e => setTransitionReason(e.target.value)}></textarea>
+                  {/* Owner Requirement Validation Feedback */}
+                  {ownerRequired && (
+                    <div className="alert alert-warning small py-2 mb-2" role="alert">
+                      Ticket must be assigned to an owner before transitioning from '{ticket.status}' to '{pendingStatus}'.
                     </div>
                   )}
+
+                  {/* Resolution Gate Feedback */}
+                  {isResolutionGateBlocked && (
+                    <div className="alert alert-warning small py-2 mb-2 d-flex justify-content-between align-items-center" role="alert">
+                      <span>⚠️ Resolution Gate: At least one Action Taken must be recorded before resolving this ticket.</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-link text-success p-0 ms-2 text-nowrap fw-bold"
+                        onClick={() => {
+                          const addBtn = document.querySelector<HTMLButtonElement>('[data-testid="add-action-taken-btn"]');
+                          if (addBtn) addBtn.click();
+                        }}
+                      >
+                        [+ Log Action Taken]
+                      </button>
+                    </div>
+                  )}
+
+                  {isResolving && !isResolutionGateBlocked && isTransitionValid && (
+                    <div className="mb-2">
+                      <label className="form-label small fw-bold mb-1">
+                        Resolution Details (optional Public Comment explaining fix to requester)
+                      </label>
+                      <textarea
+                        className="form-control form-control-sm"
+                        placeholder="Explain the fix to the requester..."
+                        value={transitionComment}
+                        onChange={e => setTransitionComment(e.target.value)}
+                        disabled={updatingStatus}
+                      ></textarea>
+                      <small className="text-muted d-block mt-1">
+                        Optional: Explain the fix to the requester. If left blank, the ticket will be resolved without creating an empty comment.
+                      </small>
+                    </div>
+                  )}
+
+                  {isTransitionValid && requiresReason && (
+                    <div className="mb-2">
+                      <label className="form-label small fw-bold mb-1">
+                        {pendingStatus === 'Cancelled' ? 'Cancellation Reason' : 'Reopen Reason'} <span className="text-danger">*</span>
+                      </label>
+                      <textarea
+                        className="form-control form-control-sm"
+                        placeholder={pendingStatus === 'Cancelled' ? 'Cancellation reason (required)' : 'Reopen reason (required)'}
+                        value={transitionReason}
+                        onChange={e => setTransitionReason(e.target.value)}
+                        disabled={updatingStatus}
+                        required
+                      ></textarea>
+                    </div>
+                  )}
+
                   {isTransitionValid && requiresComment && (
                     <div className="mb-2">
-                      <textarea className="form-control form-control-sm" placeholder="Public comment (required)" value={transitionComment} onChange={e => setTransitionComment(e.target.value)}></textarea>
+                      <label className="form-label small fw-bold mb-1">
+                        Public Comment <span className="text-danger">*</span>
+                      </label>
+                      <textarea
+                        className="form-control form-control-sm"
+                        placeholder="Public comment (required)"
+                        value={transitionComment}
+                        onChange={e => setTransitionComment(e.target.value)}
+                        disabled={updatingStatus}
+                        required
+                      ></textarea>
                     </div>
                   )}
                   
                   {isTransitionValid && (
-                    <button className="btn btn-sm btn-primary w-100" onClick={handleStatusUpdate} disabled={updatingStatus || (requiresReason && !transitionReason.trim()) || (requiresComment && !transitionComment.trim())}>
-                      {updatingStatus ? 'Updating...' : 'Confirm Status Change'}
+                    <button
+                      className="btn btn-sm btn-primary w-100 mt-2"
+                      onClick={handleStatusUpdate}
+                      disabled={isSubmitDisabled}
+                    >
+                      {updatingStatus ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          Updating...
+                        </>
+                      ) : (
+                        'Confirm Status Change'
+                      )}
                     </button>
                   )}
                 </div>

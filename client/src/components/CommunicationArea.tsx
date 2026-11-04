@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL } from '../api';
+import { generateUUID } from './ActionsTaken';
 
 interface CommunicationAreaProps {
   ticketId: number;
   ticketStatus: string;
+  lastUpdatedAt: string;
   onUpdate: () => void;
 }
 
@@ -16,13 +18,18 @@ interface Comment {
   isInternal?: boolean;
 }
 
-export function CommunicationArea({ ticketId, ticketStatus, onUpdate }: CommunicationAreaProps) {
+export function CommunicationArea({ ticketId, ticketStatus, lastUpdatedAt, onUpdate }: CommunicationAreaProps) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Comment[]>([]);
   const [newContent, setNewContent] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isConflict, setIsConflict] = useState(false);
+
+  // Single Idempotency-Key per logical submission; preserved across network retries
+  const [commentIdempotencyKey, setCommentIdempotencyKey] = useState<string>(() => generateUUID());
+  const [appearsResolvedKey, setAppearsResolvedKey] = useState<string>(() => generateUUID());
 
   const fetchMessages = async () => {
     try {
@@ -62,19 +69,34 @@ export function CommunicationArea({ ticketId, ticketStatus, onUpdate }: Communic
 
     setLoading(true);
     setError('');
+    setIsConflict(false);
     try {
       const endpoint = isInternal ? 'notes' : 'comments';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const payload: any = { content: newContent };
+      if (!isInternal) {
+        payload.lastUpdatedAt = lastUpdatedAt;
+        headers['Idempotency-Key'] = commentIdempotencyKey;
+      }
+
       const res = await fetch(`${API_URL}/api/tickets/${ticketId}/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         credentials: 'include',
-        body: JSON.stringify({ content: newContent })
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to post message');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket was modified in another session. Your draft comment has been preserved.');
+        }
+        throw new Error(data.error || 'Failed to post message');
+      }
 
       setNewContent('');
+      setCommentIdempotencyKey(generateUUID()); // Fresh UUID generated for next distinct submission
       await fetchMessages();
       onUpdate(); // Triggers parent ticket refresh in case status changed
     } catch (err: any) {
@@ -87,15 +109,28 @@ export function CommunicationArea({ ticketId, ticketStatus, onUpdate }: Communic
   const handleAppearsResolved = async () => {
     setLoading(true);
     setError('');
+    setIsConflict(false);
     try {
       const res = await fetch(`${API_URL}/api/tickets/${ticketId}/appears-resolved`, {
         method: 'POST',
-        credentials: 'include'
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': appearsResolvedKey
+        },
+        credentials: 'include',
+        body: JSON.stringify({ lastUpdatedAt })
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to mark as resolved');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setIsConflict(true);
+          throw new Error(data.error || 'Ticket was modified in another session. Advisory feedback requires the ticket to remain In Progress at the current revision.');
+        }
+        throw new Error(data.error || 'Failed to mark as resolved');
+      }
 
+      setAppearsResolvedKey(generateUUID()); // Fresh UUID generated for next distinct submission
       await fetchMessages();
       onUpdate();
     } catch (err: any) {
@@ -132,7 +167,23 @@ export function CommunicationArea({ ticketId, ticketStatus, onUpdate }: Communic
 
       {user?.role !== 'Administrator' && (
         <form onSubmit={handleSubmit}>
-          {error && <div className="alert alert-danger py-2">{error}</div>}
+          {error && !isConflict && <div className="alert alert-danger py-2">{error}</div>}
+          {isConflict && (
+            <div className="alert alert-warning py-2 d-flex justify-content-between align-items-center mb-3">
+              <span>{error || 'Ticket state was modified in another session. Your draft comment has been preserved.'}</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-dark ms-3 text-nowrap"
+                onClick={() => {
+                  setIsConflict(false);
+                  setError('');
+                  onUpdate();
+                }}
+              >
+                Reload Latest Data
+              </button>
+            </div>
+          )}
           
           <div className="mb-3">
             <textarea 
@@ -170,11 +221,11 @@ export function CommunicationArea({ ticketId, ticketStatus, onUpdate }: Communic
             <div className="d-flex gap-2">
               {user?.role === 'Requester' && ticketStatus === 'In Progress' && (
                 <button type="button" className="btn btn-outline-success" onClick={handleAppearsResolved} disabled={loading}>
-                  Problem Appears Resolved
+                  {loading ? 'Submitting...' : 'Problem Appears Resolved'}
                 </button>
               )}
               <button type="submit" className="btn btn-primary" disabled={loading || !newContent.trim()}>
-                Post Message
+                {loading ? 'Posting...' : 'Post Message'}
               </button>
             </div>
           </div>

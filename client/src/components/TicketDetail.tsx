@@ -254,6 +254,7 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
         <CommunicationArea
           ticketId={ticket.id}
           ticketStatus={ticket.status}
+          lastUpdatedAt={ticket.updatedAt}
           onUpdate={fetchTicket}
         />
       </div>

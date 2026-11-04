@@ -110,9 +110,21 @@
 *   **Purpose:** Claim or assign/reassign a ticket.
 *   **Auth Requirement:** Required.
 *   **Permitted Roles:** IT Staff. (Administrators denied).
-*   **Request Shape:** `{ "ownerId": 5 }` (Send null to unassign).
-*   **Success Status:** `200 OK`.
-*   **Errors:** `400` (invalid owner ID, owner not active IT Staff), `403` (forbidden for Requesters/Admins), `404` (not found).
+*   **Request Shape:**
+    ```json
+    {
+      "ownerId": 5,
+      "lastUpdatedAt": "2026-11-04T12:00:00.000Z"
+    }
+    ```
+    *(Send `ownerId: null` to unassign).*
+*   **Concurrency Control (CAS):** Requires mandatory `lastUpdatedAt` adhering to strict ISO 8601 timestamp validation (via `parseStrictIsoTimestamp`). The server performs an atomic Compare-And-Swap (CAS) update conditioned on Ticket ID and `updatedAt`.
+*   **Success Status:** `200 OK`. Returns the updated ticket.
+*   **Errors:**
+    *   `400 Bad Request`: Invalid owner ID format, owner not an active IT Staff user, missing `lastUpdatedAt`, malformed/non-strict ISO timestamp format, or invalid calendar date.
+    *   `403 Forbidden`: Authenticated user is not IT Staff (Requesters and Administrators denied).
+    *   `404 Not Found`: Ticket does not exist.
+    *   `409 Conflict`: Stale `lastUpdatedAt` token indicating the ticket was modified by another session.
 
 #### PATCH `/api/staff/tickets/:id/status`
 *   **Purpose:** Update ticket status and/or IT Priority. Required state transition conditions are atomically fulfilled by this endpoint without requiring separate API calls to the Comments/Notes endpoints.
