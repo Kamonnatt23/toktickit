@@ -157,10 +157,47 @@ describe('GET /api/staff/tickets', () => {
   });
 
   it('safely ignores invalid query parameters without 400 or 500', async () => {
-    const res = await request(app).get('/api/staff/tickets?sortBy=invalidField&limit=invalid&page=invalid&categoryId=invalid&ownerId=invalid').set('Cookie', `sessionId=${staffCookie}`);
+    const res = await request(app).get('/api/staff/tickets?sortBy=invalidField&limit=invalid&page=invalid&categoryId=invalid').set('Cookie', `sessionId=${staffCookie}`);
     expect(res.status).toBe(200);
     expect(res.body.pagination.page).toBe(1);
     expect(res.body.pagination.limit).toBe(10);
+    expect(res.body.data).toBeDefined();
+  });
+
+  it('validates ownerId strictly: rejects invalid values with 400 and accepts valid positive ID or Unassigned', async () => {
+    // ownerId=abc -> 400
+    let res = await request(app).get('/api/staff/tickets?ownerId=abc').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid ownerId parameter/i);
+
+    // ownerId=All -> 400 (per Lab 4 api-spec.md Section 3.4)
+    res = await request(app).get('/api/staff/tickets?ownerId=All').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid ownerId parameter/i);
+
+    // ownerId=0 -> 400
+    res = await request(app).get('/api/staff/tickets?ownerId=0').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid ownerId parameter/i);
+
+    // ownerId=-5 -> 400
+    res = await request(app).get('/api/staff/tickets?ownerId=-5').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid ownerId parameter/i);
+
+    // Fractional numeric value: ownerId=1.5 -> 400
+    res = await request(app).get('/api/staff/tickets?ownerId=1.5').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid ownerId parameter/i);
+
+    // Valid positive owner ID -> 200
+    res = await request(app).get('/api/staff/tickets?ownerId=1').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeDefined();
+
+    // ownerId=Unassigned -> 200
+    res = await request(app).get('/api/staff/tickets?ownerId=Unassigned').set('Cookie', `sessionId=${staffCookie}`);
+    expect(res.status).toBe(200);
     expect(res.body.data).toBeDefined();
   });
 });

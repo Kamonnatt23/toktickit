@@ -14,21 +14,38 @@ interface Ticket {
 
 interface MyTicketsProps {
   onTicketClick?: (id: number) => void;
+  initialFilter?: {
+    view?: string;
+    status?: string;
+    withinDays?: number;
+  } | null;
+  onClearInitialFilter?: () => void;
 }
 
-export function MyTickets({ onTicketClick }: MyTicketsProps) {
+export function MyTickets({ onTicketClick, initialFilter, onClearInitialFilter }: MyTicketsProps) {
   const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('All');
+  const [status, setStatus] = useState(initialFilter?.status || 'All');
+  const [view, setView] = useState(initialFilter?.view || '');
+  const [withinDays, setWithinDays] = useState<number | undefined>(initialFilter?.withinDays);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    if (initialFilter) {
+      if (initialFilter.view !== undefined) setView(initialFilter.view);
+      if (initialFilter.status !== undefined) setStatus(initialFilter.status);
+      if (initialFilter.withinDays !== undefined) setWithinDays(initialFilter.withinDays);
+      setPage(1);
+    }
+  }, [initialFilter]);
 
   const fetchTickets = async () => {
     if (!user) return;
@@ -45,6 +62,8 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
       });
       if (search) params.append('search', search);
       if (status && status !== 'All') params.append('status', status);
+      if (view) params.append('view', view);
+      if (withinDays) params.append('withinDays', String(withinDays));
 
       const res = await fetch(`${API_URL}/api/tickets?${params.toString()}`, {
         headers: {  },
@@ -67,7 +86,7 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
 
   useEffect(() => {
     fetchTickets();
-  }, [user, page, sortBy, sortOrder, status]);
+  }, [user, page, sortBy, sortOrder, status, view, withinDays]);
 
   // Debounced search
   useEffect(() => {
@@ -78,6 +97,15 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const handleClearFilter = () => {
+    setView('');
+    setStatus('All');
+    setWithinDays(undefined);
+    setSearch('');
+    setPage(1);
+    onClearInitialFilter?.();
+  };
+
   if (!user) return null;
 
   return (
@@ -87,6 +115,25 @@ export function MyTickets({ onTicketClick }: MyTicketsProps) {
       </div>
       <div className="card-body p-4 p-md-5">
         {error && <div className="alert alert-danger" style={{ borderRadius: '15px' }}>{error}</div>}
+
+        {(view || withinDays || (status !== 'All' && initialFilter?.status)) && (
+          <div className="alert alert-success d-flex justify-content-between align-items-center mb-4" style={{ borderRadius: '15px' }}>
+            <div>
+              <i className="bi bi-funnel-fill me-2"></i>
+              <strong>Active Dashboard Filter:</strong>{' '}
+              {view === 'open' && 'My Open Tickets'}
+              {withinDays && `Recently Resolved (within ${withinDays} days)`}
+              {!withinDays && view !== 'open' && status}
+            </div>
+            <button
+              className="btn btn-sm btn-outline-success"
+              style={{ borderRadius: '50rem' }}
+              onClick={handleClearFilter}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
 
         <div className="row mb-4">
           <div className="col-md-4 mb-3 mb-md-0">
