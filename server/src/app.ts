@@ -191,7 +191,7 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
       return res.status(403).json({ error: "Forbidden: Requesters cannot access the Staff Queue" });
     }
 
-    const { search, status, categoryId, ownerId, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+    const { search, status, categoryId, ownerId, itPriority, scope, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
     let pageNum = parseInt(page as string, 10);
     if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
@@ -202,24 +202,55 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
 
     const skip = (pageNum - 1) * limitNum;
 
-    const whereClause: any = {};
+    const andConditions: any[] = [];
 
-    if (status && typeof status === 'string' && status !== 'All') {
-      whereClause.status = status;
+    const VALID_STATUSES = ['All', 'New', 'Open', 'In Progress', 'Waiting for Requester', 'Resolved', 'Closed', 'Reopened', 'Cancelled'];
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: "Invalid status parameter." });
+      }
+      if (status !== 'All') {
+        andConditions.push({ status });
+      }
+    }
+
+    if (scope !== undefined) {
+      if (scope !== 'active') {
+        return res.status(400).json({ error: "Invalid scope parameter. Supported value: 'active'." });
+      }
+      andConditions.push({ status: { notIn: ['Resolved', 'Closed', 'Cancelled'] } });
+    }
+
+    if (ownerId !== undefined) {
+      if (ownerId === 'Unassigned') {
+        andConditions.push({ ownerId: null });
+        andConditions.push({ status: { notIn: ['Resolved', 'Closed', 'Cancelled'] } });
+      } else {
+        if (typeof ownerId !== 'string' || !/^[1-9]\d*$/.test(ownerId)) {
+          return res.status(400).json({ error: "Invalid ownerId parameter. Must be 'Unassigned' or a positive integer." });
+        }
+        const oId = parseInt(ownerId, 10);
+        andConditions.push({ ownerId: oId });
+      }
+    }
+
+    const VALID_PRIORITIES = ['All', 'Low', 'Medium', 'High', 'Critical'];
+    if (itPriority !== undefined) {
+      if (typeof itPriority !== 'string') {
+        return res.status(400).json({ error: "Invalid itPriority parameter." });
+      }
+      const matched = VALID_PRIORITIES.find(p => p.toLowerCase() === itPriority.toLowerCase());
+      if (!matched) {
+        return res.status(400).json({ error: "Invalid itPriority parameter." });
+      }
+      if (matched !== 'All') {
+        andConditions.push({ itPriority: matched });
+      }
     }
 
     if (categoryId && typeof categoryId === 'string' && categoryId !== 'All') {
       const catId = parseInt(categoryId, 10);
-      if (!isNaN(catId)) whereClause.categoryId = catId;
-    }
-
-    if (ownerId && typeof ownerId === 'string' && ownerId !== 'All') {
-      if (ownerId === 'Unassigned') {
-        whereClause.ownerId = null;
-      } else {
-        const oId = parseInt(ownerId, 10);
-        if (!isNaN(oId)) whereClause.ownerId = oId;
-      }
+      if (!isNaN(catId) && catId > 0) andConditions.push({ categoryId: catId });
     }
 
     if (search && typeof search === 'string') {
@@ -227,11 +258,13 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
       const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
 
       if (searchIdMatch) {
-         whereClause.id = parseInt(searchIdMatch[1], 10);
+         andConditions.push({ id: parseInt(searchIdMatch[1], 10) });
       } else {
-         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+         andConditions.push({ summary: { contains: searchStr, mode: 'insensitive' } });
       }
     }
+
+    const whereClause: any = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const validSortFields = ['createdAt', 'priority', 'itPriority', 'status'];
     const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';
@@ -586,37 +619,340 @@ app.get("/api/staff/users", requireAuth, async (req: Request, res: Response): Pr
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+// ===========================================================================
+// Operational Dashboard Endpoints (Issue 6)
+// ===========================================================================
+
+// GET /api/dashboard/requester
+app.get("/api/dashboard/requester", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Requester dashboard is available only to Requesters" });
+    }
+
+    const prisma = getPrisma();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      openTickets,
+      waitingForRequester,
+      inProgress,
+      resolved,
+      closed,
+      recentlyUpdated,
+      recentlyResolved
+    ] = await Promise.all([
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: { in: ['New', 'Open', 'In Progress', 'Waiting for Requester', 'Reopened'] }
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Waiting for Requester'
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'In Progress'
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Resolved',
+          resolvedAt: { not: null, gte: thirtyDaysAgo }
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Closed'
+        }
+      }),
+      prisma.ticket.findMany({
+        where: { requesterId: user.id },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 5,
+        select: {
+          id: true,
+          summary: true,
+          status: true,
+          priority: true,
+          itPriority: true,
+          updatedAt: true,
+          createdAt: true
+        }
+      }),
+      prisma.ticket.findMany({
+        where: {
+          requesterId: user.id,
+          status: 'Resolved',
+          resolvedAt: { not: null, gte: thirtyDaysAgo }
+        },
+        orderBy: [{ resolvedAt: 'desc' }, { id: 'desc' }],
+        take: 5,
+        select: {
+          id: true,
+          summary: true,
+          status: true,
+          priority: true,
+          itPriority: true,
+          resolvedAt: true,
+          updatedAt: true,
+          createdAt: true
+        }
+      })
+    ]);
+
+    const recentlyUpdatedTickets = recentlyUpdated.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    const recentlyResolvedTickets = recentlyResolved.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    return res.status(200).json({
+      metrics: {
+        openTickets,
+        waitingForRequester,
+        inProgress,
+        resolved,
+        closed
+      },
+      recentlyUpdatedTickets,
+      recentlyResolvedTickets
+    });
+  } catch (err) {
+    console.error("Error fetching requester dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+async function fetchStaffTriageData(staffUserId: number) {
+  const prisma = getPrisma();
+  const activeStatusFilter = { notIn: ['Resolved', 'Closed', 'Cancelled'] };
+
+  const [
+    unassigned,
+    myAssigned,
+    newTickets,
+    openTickets,
+    inProgressTickets,
+    waitingForRequesterTickets,
+    priorityGroups,
+    recentTicketsData
+  ] = await Promise.all([
+    prisma.ticket.count({
+      where: {
+        ownerId: null,
+        status: activeStatusFilter
+      }
+    }),
+    prisma.ticket.count({
+      where: {
+        ownerId: staffUserId,
+        status: activeStatusFilter
+      }
+    }),
+    prisma.ticket.count({
+      where: { status: 'New' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'Open' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'In Progress' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'Waiting for Requester' }
+    }),
+    prisma.ticket.groupBy({
+      by: ['itPriority'],
+      where: { status: activeStatusFilter },
+      _count: { id: true }
+    }),
+    prisma.ticket.findMany({
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        summary: true,
+        status: true,
+        priority: true,
+        itPriority: true,
+        updatedAt: true,
+        owner: { select: { id: true, name: true } },
+        requester: { select: { id: true, name: true } }
+      }
+    })
+  ]);
+
+  const priorityBreakdown = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0
+  };
+
+  for (const group of priorityGroups) {
+    const p = (group.itPriority || '').toLowerCase();
+    if (p in priorityBreakdown) {
+      (priorityBreakdown as any)[p] = group._count.id;
+    }
+  }
+
+  const recentTickets = recentTicketsData.map(t => ({
+    id: t.id,
+    ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`,
+    summary: t.summary,
+    status: t.status,
+    priority: t.priority,
+    itPriority: t.itPriority,
+    owner: t.owner,
+    requester: t.requester,
+    updatedAt: t.updatedAt
+  }));
+
+  const metrics = {
+    unassigned,
+    myAssigned,
+    new: newTickets,
+    open: openTickets,
+    inProgress: inProgressTickets,
+    waitingForRequester: waitingForRequesterTickets
+  };
+
+  return { metrics, priorityBreakdown, recentTickets };
+}
+
+// GET /api/dashboard/staff
+app.get("/api/dashboard/staff", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Requesters cannot access Staff Dashboard" });
+    }
+
+    const { metrics, priorityBreakdown, recentTickets } = await fetchStaffTriageData(user.id);
+
+    return res.status(200).json({
+      metrics,
+      priorityBreakdown,
+      recentTickets
+    });
+  } catch (err) {
+    console.error("Error fetching staff dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/dashboard/admin
+app.get("/api/dashboard/admin", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Administrator') {
+      return res.status(403).json({ error: "Forbidden: Administrator dashboard is available only to Administrators" });
+    }
+
+    const prisma = getPrisma();
+
+    const [
+      staffData,
+      totalUsers,
+      activeRequesters,
+      activeStaff,
+      activeAdmins,
+      inactiveUsers
+    ] = await Promise.all([
+      fetchStaffTriageData(user.id),
+      prisma.user.count(),
+      prisma.user.count({ where: { role: 'Requester', isActive: true } }),
+      prisma.user.count({ where: { role: 'IT Staff', isActive: true } }),
+      prisma.user.count({ where: { role: 'Administrator', isActive: true } }),
+      prisma.user.count({ where: { isActive: false } })
+    ]);
+
+    return res.status(200).json({
+      staffMetrics: staffData.metrics,
+      priorityBreakdown: staffData.priorityBreakdown,
+      userStats: {
+        totalUsers,
+        activeRequesters,
+        activeStaff,
+        activeAdmins,
+        inactiveUsers
+      },
+      recentTickets: staffData.recentTickets
+    });
+  } catch (err) {
+    console.error("Error fetching admin dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Only Requesters can view this list" });
+    }
 
-    const { search, status, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+    const { search, status, view, withinDays, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
     const pageNum = parseInt(page as string, 10) || 1;
     const limitNum = parseInt(limit as string, 10) || 10;
     const skip = (pageNum - 1) * limitNum;
 
-    const whereClause: any = {};
-    if (user.role !== 'Requester') {
-      return res.status(403).json({ error: "Forbidden: Only Requesters can view this list" });
-    }
-    whereClause.requesterId = user.id;
+    const andConditions: any[] = [{ requesterId: user.id }];
 
-    if (status && status !== 'All') {
-      whereClause.status = status;
+    if (view !== undefined) {
+      if (view !== 'open') {
+        return res.status(400).json({ error: "Invalid view parameter. Supported value: 'open'." });
+      }
+      andConditions.push({ status: { in: ['New', 'Open', 'In Progress', 'Waiting for Requester', 'Reopened'] } });
+    }
+
+    const VALID_STATUSES = ['All', 'New', 'Open', 'In Progress', 'Waiting for Requester', 'Resolved', 'Closed', 'Reopened', 'Cancelled'];
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: "Invalid status parameter." });
+      }
+      if (status !== 'All') {
+        andConditions.push({ status });
+      }
+    }
+
+    if (withinDays !== undefined) {
+      const daysNum = Number(withinDays);
+      if (!Number.isInteger(daysNum) || daysNum <= 0) {
+        return res.status(400).json({ error: "withinDays must be a positive integer." });
+      }
+      if (status === 'Resolved') {
+        const daysAgo = new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
+        andConditions.push({ resolvedAt: { not: null, gte: daysAgo } });
+      }
     }
 
     if (search) {
       const searchStr = String(search).trim();
-      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i);
+      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
 
       if (searchIdMatch) {
-         whereClause.id = parseInt(searchIdMatch[1], 10);
+         andConditions.push({ id: parseInt(searchIdMatch[1], 10) });
       } else {
-         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+         andConditions.push({ summary: { contains: searchStr, mode: 'insensitive' } });
       }
     }
+
+    const whereClause: any = { AND: andConditions };
 
     const validSortFields = ['createdAt', 'priority', 'status'];
     const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';

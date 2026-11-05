@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
 
 interface Ticket {
@@ -17,18 +17,29 @@ interface Ticket {
 
 interface StaffQueueProps {
   onTicketClick?: (id: number) => void;
+  initialFilter?: {
+    ownerId?: string;
+    status?: string;
+    itPriority?: string;
+    scope?: string;
+    focusSearch?: boolean;
+  } | null;
+  onClearInitialFilter?: () => void;
 }
 
-export function StaffQueue({ onTicketClick }: StaffQueueProps) {
+export function StaffQueue({ onTicketClick, initialFilter, onClearInitialFilter }: StaffQueueProps) {
   const { user } = useAuth();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('All');
+  const [status, setStatus] = useState(initialFilter?.status || 'All');
   const [categoryId, setCategoryId] = useState('All');
-  const [ownerId, setOwnerId] = useState('All');
+  const [ownerId, setOwnerId] = useState(initialFilter?.ownerId || 'All');
+  const [itPriority, setItPriority] = useState(initialFilter?.itPriority || 'All');
+  const [scope, setScope] = useState(initialFilter?.scope || '');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
   const [page, setPage] = useState(1);
@@ -38,6 +49,19 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
 
   const [categories, setCategories] = useState<{id: number, name: string}[]>([]);
   const [staffUsers, setStaffUsers] = useState<{id: number, name: string}[]>([]);
+
+  useEffect(() => {
+    if (initialFilter) {
+      if (initialFilter.ownerId !== undefined) setOwnerId(initialFilter.ownerId);
+      if (initialFilter.status !== undefined) setStatus(initialFilter.status);
+      if (initialFilter.itPriority !== undefined) setItPriority(initialFilter.itPriority);
+      if (initialFilter.scope !== undefined) setScope(initialFilter.scope);
+      setPage(1);
+      if (initialFilter.focusSearch) {
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }
+    }
+  }, [initialFilter]);
 
   useEffect(() => {
     const loadFilters = async () => {
@@ -79,6 +103,8 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
       if (status && status !== 'All') params.append('status', status);
       if (categoryId && categoryId !== 'All') params.append('categoryId', categoryId);
       if (ownerId && ownerId !== 'All') params.append('ownerId', ownerId);
+      if (itPriority && itPriority !== 'All') params.append('itPriority', itPriority);
+      if (scope) params.append('scope', scope);
 
       const res = await fetch(`${API_URL}/api/staff/tickets?${params.toString()}`, {
         credentials: 'include'
@@ -104,7 +130,7 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
 
   useEffect(() => {
     fetchTickets();
-  }, [page, limit, sortBy, sortOrder, status, categoryId, ownerId]);
+  }, [page, limit, sortBy, sortOrder, status, categoryId, ownerId, itPriority, scope]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,8 +152,11 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
     setStatus('All');
     setCategoryId('All');
     setOwnerId('All');
+    setItPriority('All');
+    setScope('');
     setSearch('');
     setPage(1);
+    onClearInitialFilter?.();
   };
 
   const getStatusBadge = (status: string) => {
@@ -204,12 +233,34 @@ export function StaffQueue({ onTicketClick }: StaffQueueProps) {
       
       <div className="card-body">
         {error && <div className="alert alert-danger">{error}</div>}
+
+        {(scope || (itPriority && itPriority !== 'All') || (ownerId === 'Unassigned') || (ownerId !== 'All' && initialFilter?.ownerId) || (status !== 'All' && initialFilter?.status)) && (
+          <div className="alert alert-success d-flex justify-content-between align-items-center mb-4" style={{ borderRadius: '15px' }}>
+            <div>
+              <i className="bi bi-funnel-fill me-2"></i>
+              <strong>Active Dashboard Filter:</strong>{' '}
+              {ownerId === 'Unassigned' && 'Unassigned Queue'}
+              {ownerId !== 'All' && ownerId !== 'Unassigned' && `Owner ID: ${ownerId}`}
+              {itPriority && itPriority !== 'All' && ` Priority: ${itPriority}`}
+              {scope === 'active' && ' (Active Unresolved Tickets)'}
+              {status !== 'All' && ` Status: ${status}`}
+            </div>
+            <button
+              className="btn btn-sm btn-outline-success"
+              style={{ borderRadius: '50rem' }}
+              onClick={clearFilters}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
         
         <form onSubmit={handleSearch} className="row g-2 mb-4">
           <div className="col-12 col-md-3">
             <div className="input-group">
               <span className="input-group-text bg-light border-end-0"><i className="bi bi-search"></i></span>
               <input 
+                ref={searchInputRef}
                 type="text" 
                 className="form-control border-start-0 ps-0 bg-light" 
                 placeholder="Search ID or summary..." 
