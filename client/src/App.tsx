@@ -74,7 +74,7 @@ function AppContent() {
           </div>
 
           {/* Navigation Buttons */}
-          <div className="d-flex align-items-center gap-2">
+          <div className="d-flex flex-wrap align-items-center gap-2">
             <SystemStatus>
               <div className="vr d-none d-md-block mx-2" style={{ opacity: 0.2, backgroundColor: '#006B3C', width: '2px' }}></div>
               
@@ -82,21 +82,21 @@ function AppContent() {
                 <>
                   <button
                     className={`btn ${activeTab === 'dashboard' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
                     onClick={() => setActiveTab('dashboard')}
                   >
                     Dashboard
                   </button>
                   <button
                     className={`btn ${(activeTab === 'list' || activeTab === 'detail') ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: (activeTab === 'list' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'list' || activeTab === 'detail') ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: (activeTab === 'list' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'list' || activeTab === 'detail') ? 'white' : '#006B3C' }}
                     onClick={() => { setMyTicketsInitialFilter(null); setActiveTab('list'); }}
                   >
                     My Tickets
                   </button>
                   <button
                     className={`btn ${activeTab === 'create' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'create' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'create' ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: activeTab === 'create' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'create' ? 'white' : '#006B3C' }}
                     onClick={() => setActiveTab('create')}
                   >
                     Create Ticket
@@ -108,14 +108,14 @@ function AppContent() {
                 <>
                   <button
                     className={`btn ${activeTab === 'dashboard' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
                     onClick={() => setActiveTab('dashboard')}
                   >
                     Dashboard
                   </button>
                   <button
                     className={`btn ${(activeTab === 'queue' || activeTab === 'detail') ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: (activeTab === 'queue' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'queue' || activeTab === 'detail') ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: (activeTab === 'queue' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'queue' || activeTab === 'detail') ? 'white' : '#006B3C' }}
                     onClick={() => { setStaffQueueInitialFilter(null); setActiveTab('queue'); }}
                   >
                     Ticket Queue
@@ -127,21 +127,21 @@ function AppContent() {
                 <>
                   <button
                     className={`btn ${activeTab === 'dashboard' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: activeTab === 'dashboard' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'dashboard' ? 'white' : '#006B3C' }}
                     onClick={() => setActiveTab('dashboard')}
                   >
                     Dashboard
                   </button>
                   <button
                     className={`btn ${activeTab === 'users' ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: activeTab === 'users' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'users' ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: activeTab === 'users' ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: activeTab === 'users' ? 'white' : '#006B3C' }}
                     onClick={() => setActiveTab('users')}
                   >
                     User Management
                   </button>
                   <button
                     className={`btn ${(activeTab === 'queue' || activeTab === 'detail') ? 'btn-success fw-bold' : 'btn-outline-success'}`}
-                    style={{ borderRadius: '50rem', padding: '0.6rem 2rem', backgroundColor: (activeTab === 'queue' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'queue' || activeTab === 'detail') ? 'white' : '#006B3C' }}
+                    style={{ borderRadius: '50rem', padding: '0.5rem 1.25rem', backgroundColor: (activeTab === 'queue' || activeTab === 'detail') ? '#006B3C' : 'transparent', borderColor: '#006B3C', color: (activeTab === 'queue' || activeTab === 'detail') ? 'white' : '#006B3C' }}
                     onClick={() => { setStaffQueueInitialFilter(null); setActiveTab('queue'); }}
                   >
                     Ticket Queue
