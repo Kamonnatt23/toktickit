@@ -90,7 +90,8 @@ describe('Comments and Notes API', () => {
     const ticket = await createTicket('In Progress', staffId);
     const res = await request(app)
       .post(`/api/tickets/${ticket.id}/appears-resolved`)
-      .set('Cookie', `sessionId=${requesterCookie}`);
+      .set('Cookie', `sessionId=${requesterCookie}`)
+      .send({ lastUpdatedAt: ticket.updatedAt.toISOString() });
     
     expect(res.status).toBe(201);
     expect(res.body.content).toMatch(/appears resolved/i);
@@ -104,7 +105,8 @@ describe('Comments and Notes API', () => {
     const ticket = await createTicket('Open', staffId);
     const res = await request(app)
       .post(`/api/tickets/${ticket.id}/appears-resolved`)
-      .set('Cookie', `sessionId=${requesterCookie}`);
+      .set('Cookie', `sessionId=${requesterCookie}`)
+      .send({ lastUpdatedAt: ticket.updatedAt.toISOString() });
     
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/In Progress/i);
@@ -115,7 +117,7 @@ describe('Comments and Notes API', () => {
     const res = await request(app)
       .post(`/api/tickets/${ticket.id}/comments`)
       .set('Cookie', `sessionId=${requesterCookie}`)
-      .send({ content: 'Here is the info' });
+      .send({ content: 'Here is the info', lastUpdatedAt: ticket.updatedAt.toISOString() });
     
     expect(res.status).toBe(201);
     const updated = await getPrisma().ticket.findUnique({ where: { id: ticket.id } });
@@ -127,7 +129,7 @@ describe('Comments and Notes API', () => {
     const res = await request(app)
       .post(`/api/tickets/${ticket.id}/comments`)
       .set('Cookie', `sessionId=${requesterCookie}`)
-      .send({ content: 'Still broken' });
+      .send({ content: 'Still broken', lastUpdatedAt: ticket.updatedAt.toISOString() });
     
     expect(res.status).toBe(201);
     const updated = await getPrisma().ticket.findUnique({ where: { id: ticket.id } });
@@ -140,7 +142,7 @@ describe('Comments and Notes API', () => {
     const res = await request(app)
       .post(`/api/tickets/${ticket.id}/comments`)
       .set('Cookie', `sessionId=${staffCookie}`)
-      .send({ content: 'Are you there?' });
+      .send({ content: 'Are you there?', lastUpdatedAt: ticket.updatedAt.toISOString() });
     
     expect(res.status).toBe(201);
     const updated = await getPrisma().ticket.findUnique({ where: { id: ticket.id } });

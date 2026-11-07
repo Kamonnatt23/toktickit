@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 
-function restoreUser(email) {
+function restoreUser(email: string) {
   const script = `
     import { PrismaClient } from '@prisma/client';
     import * as bcrypt from 'bcrypt';

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext.js';
 import { CommunicationArea } from './CommunicationArea';
+import { ActionsTaken } from './ActionsTaken';
 
 interface TicketDetailProps {
   ticketId: number;
@@ -244,6 +245,18 @@ export function TicketDetail({ ticketId, onBack }: TicketDetailProps) {
             </div>
           )}
         </div>
+
+        <ActionsTaken
+          ticketId={ticket.id}
+          onTicketUpdated={fetchTicket}
+        />
+
+        <CommunicationArea
+          ticketId={ticket.id}
+          ticketStatus={ticket.status}
+          lastUpdatedAt={ticket.updatedAt}
+          onUpdate={fetchTicket}
+        />
       </div>
     </div>
   );

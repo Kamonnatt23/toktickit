@@ -1,18 +1,27 @@
 import * as bcrypt from 'bcrypt';
-﻿import express, { Request, Response } from "express";
+import crypto from "crypto";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes.js";
 import attachmentsRouter from "./attachments.js";
+import actionsRouter from "./routes/actions.routes.js";
 import { requireAuth, AuthenticatedRequest } from "./middleware/auth.middleware.js";
+import { parseStrictIsoTimestamp } from "./utils/timestamp.js";
 
-let prisma: PrismaClient;
-
-export function getPrisma() {
-  if (!prisma) prisma = new PrismaClient();
-  return prisma;
+export function isIdempotencyKeyP2002(err: any): boolean {
+  if (err?.code !== 'P2002') return false;
+  const target = err.meta?.target;
+  if (!Array.isArray(target) || target.length !== 4) return false;
+  const requiredFields = ['route', 'ticketId', 'userId', 'key'];
+  return requiredFields.every((f) => target.includes(f)) &&
+         new Set(target).size === 4 &&
+         target.every((f) => typeof f === 'string' && requiredFields.includes(f));
 }
+
+import { getPrisma } from "./prisma.js";
+export { getPrisma };
 
 // getPrisma() is your lazy database handle. Call it INSIDE a route when you
 // need the DB (Issue 4). It is intentionally unused until then.
@@ -28,6 +37,7 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/attachments", attachmentsRouter);
+app.use("/api", actionsRouter);
 
 app.get("/", (_req: Request, res: Response) => {
   res.send("TokTickIT API is running! Access /api/health to check status.");
@@ -181,7 +191,7 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
       return res.status(403).json({ error: "Forbidden: Requesters cannot access the Staff Queue" });
     }
 
-    const { search, status, categoryId, ownerId, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+    const { search, status, categoryId, ownerId, itPriority, scope, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
     let pageNum = parseInt(page as string, 10);
     if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
@@ -192,24 +202,55 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
 
     const skip = (pageNum - 1) * limitNum;
 
-    const whereClause: any = {};
+    const andConditions: any[] = [];
 
-    if (status && typeof status === 'string' && status !== 'All') {
-      whereClause.status = status;
+    const VALID_STATUSES = ['All', 'New', 'Open', 'In Progress', 'Waiting for Requester', 'Resolved', 'Closed', 'Reopened', 'Cancelled'];
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: "Invalid status parameter." });
+      }
+      if (status !== 'All') {
+        andConditions.push({ status });
+      }
+    }
+
+    if (scope !== undefined) {
+      if (scope !== 'active') {
+        return res.status(400).json({ error: "Invalid scope parameter. Supported value: 'active'." });
+      }
+      andConditions.push({ status: { notIn: ['Resolved', 'Closed', 'Cancelled'] } });
+    }
+
+    if (ownerId !== undefined) {
+      if (ownerId === 'Unassigned') {
+        andConditions.push({ ownerId: null });
+        andConditions.push({ status: { notIn: ['Resolved', 'Closed', 'Cancelled'] } });
+      } else {
+        if (typeof ownerId !== 'string' || !/^[1-9]\d*$/.test(ownerId)) {
+          return res.status(400).json({ error: "Invalid ownerId parameter. Must be 'Unassigned' or a positive integer." });
+        }
+        const oId = parseInt(ownerId, 10);
+        andConditions.push({ ownerId: oId });
+      }
+    }
+
+    const VALID_PRIORITIES = ['All', 'Low', 'Medium', 'High', 'Critical'];
+    if (itPriority !== undefined) {
+      if (typeof itPriority !== 'string') {
+        return res.status(400).json({ error: "Invalid itPriority parameter." });
+      }
+      const matched = VALID_PRIORITIES.find(p => p.toLowerCase() === itPriority.toLowerCase());
+      if (!matched) {
+        return res.status(400).json({ error: "Invalid itPriority parameter." });
+      }
+      if (matched !== 'All') {
+        andConditions.push({ itPriority: matched });
+      }
     }
 
     if (categoryId && typeof categoryId === 'string' && categoryId !== 'All') {
       const catId = parseInt(categoryId, 10);
-      if (!isNaN(catId)) whereClause.categoryId = catId;
-    }
-
-    if (ownerId && typeof ownerId === 'string' && ownerId !== 'All') {
-      if (ownerId === 'Unassigned') {
-        whereClause.ownerId = null;
-      } else {
-        const oId = parseInt(ownerId, 10);
-        if (!isNaN(oId)) whereClause.ownerId = oId;
-      }
+      if (!isNaN(catId) && catId > 0) andConditions.push({ categoryId: catId });
     }
 
     if (search && typeof search === 'string') {
@@ -217,11 +258,13 @@ app.get("/api/staff/tickets", requireAuth, async (req: Request, res: Response): 
       const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
 
       if (searchIdMatch) {
-         whereClause.id = parseInt(searchIdMatch[1], 10);
+         andConditions.push({ id: parseInt(searchIdMatch[1], 10) });
       } else {
-         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+         andConditions.push({ summary: { contains: searchStr, mode: 'insensitive' } });
       }
     }
+
+    const whereClause: any = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const validSortFields = ['createdAt', 'priority', 'itPriority', 'status'];
     const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';
@@ -279,9 +322,18 @@ app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res
       return res.status(400).json({ error: "Invalid ticket ID" });
     }
 
-    const { ownerId } = req.body;
+    const { ownerId, lastUpdatedAt } = req.body;
     if (ownerId !== null && ownerId !== undefined && typeof ownerId !== 'number') {
       return res.status(400).json({ error: "Invalid ownerId format" });
+    }
+
+    if (!lastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
+    }
+
+    const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+    if (!parsedLastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
     const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
@@ -296,12 +348,42 @@ app.patch("/api/staff/tickets/:id/assign", requireAuth, async (req: Request, res
       }
     }
 
-    const updatedTicket = await getPrisma().ticket.update({
-      where: { id: ticketId },
-      data: { ownerId: ownerId === undefined ? ticket.ownerId : ownerId }
+    const updateResult = await getPrisma().ticket.updateMany({
+      where: {
+        id: ticketId,
+        updatedAt: parsedLastUpdatedAt
+      },
+      data: {
+        ownerId: ownerId === undefined ? ticket.ownerId : ownerId,
+        updatedAt: new Date()
+      }
     });
 
-    return res.status(200).json(updatedTicket);
+    if (updateResult.count === 0) {
+      const currentTicket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
+      if (!currentTicket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+      return res.status(409).json({
+        error: "Ticket was modified by another session. Please reload the latest ticket data and try again."
+      });
+    }
+
+    const updatedTicket = await getPrisma().ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: { select: { id: true, name: true, email: true, role: true } },
+        owner: { select: { id: true, name: true, email: true, role: true } },
+        attachments: true
+      }
+    });
+
+    return res.status(200).json({
+      ...updatedTicket,
+      ticketNumber: `TKT-${String(updatedTicket!.id).padStart(3, '0')}`
+    });
   } catch (err) {
     console.error("Error assigning ticket:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -321,123 +403,199 @@ app.patch("/api/staff/tickets/:id/status", requireAuth, async (req: Request, res
       return res.status(400).json({ error: "Invalid ticket ID" });
     }
 
-    const { status, itPriority, comment, reason } = req.body;
+    const { status, itPriority, comment, reason, lastUpdatedAt } = req.body;
 
-    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
-    if (!ticket) {
-      return res.status(404).json({ error: "Ticket not found" });
+    if (!lastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
+    }
+
+    const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+    if (!parsedLastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
     const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
-    if (itPriority && !validPriorities.includes(itPriority)) {
+    if (itPriority !== undefined && itPriority !== null && !validPriorities.includes(itPriority)) {
       return res.status(400).json({ error: "Invalid IT Priority" });
     }
 
-    const transitions: Record<string, string[]> = {
-      'New': ['Open', 'Cancelled'],
-      'Open': ['In Progress', 'Waiting for Requester'],
-      'Waiting for Requester': ['Open', 'In Progress'],
-      'In Progress': ['Resolved', 'Waiting for Requester'],
-      'Resolved': ['Closed'],
-      'Closed': ['Reopened'],
-      'Cancelled': []
-    };
-
-    if (status && status !== ticket.status) {
-      const allowed = transitions[ticket.status] || [];
-      if (!allowed.includes(status)) {
-        return res.status(400).json({ error: `Invalid transition from ${ticket.status} to ${status}` });
-      }
-
-      // Check required conditions
-      if (status === 'In Progress' && ticket.status === 'Open') {
-        if (!ticket.ownerId) {
-          return res.status(400).json({ error: "Ticket must be assigned before moving to In Progress" });
-        }
-      }
-
-      if (status === 'Open' && ticket.status === 'New') {
-        if (!ticket.ownerId) {
-          return res.status(400).json({ error: "Ticket must be claimed/assigned before opening" });
-        }
-      }
-
-      if (status === 'Cancelled' && ticket.status === 'New') {
-        if (!reason || typeof reason !== 'string' || reason.trim() === '') {
-          return res.status(400).json({ error: "Cancellation reason is required" });
-        }
-      }
-
-      if (status === 'Waiting for Requester' && ['Open', 'In Progress'].includes(ticket.status)) {
-        if (!comment || typeof comment !== 'string' || comment.trim() === '') {
-          return res.status(400).json({ error: "Public comment is required" });
-        }
-      }
-
-      if (status === 'Resolved' && ticket.status === 'In Progress') {
-        if (!comment || typeof comment !== 'string' || comment.trim() === '') {
-          return res.status(400).json({ error: "Resolution comment is required" });
-        }
-      }
+    if (!status && !itPriority) {
+      return res.status(400).json({ error: "At least one of status or itPriority must be provided." });
     }
 
-    // Prepare transaction
-    const transactionOps = [];
-    const updateData: any = {};
-    if (status) updateData.status = status;
-    if (itPriority) updateData.itPriority = itPriority;
+    const updatedTicket = await getPrisma().$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id: ticketId } });
+      if (!ticket) {
+        const err = new Error("Ticket not found");
+        (err as any).status = 404;
+        throw err;
+      }
 
-    if (Object.keys(updateData).length > 0) {
-      transactionOps.push(getPrisma().ticket.update({
-        where: { id: ticketId },
+      if (ticket.updatedAt.getTime() !== parsedLastUpdatedAt.getTime()) {
+        const err = new Error("Ticket was modified by another session. Please reload and try again.");
+        (err as any).status = 409;
+        throw err;
+      }
+
+      if (status) {
+        const validTransitions: Record<string, string[]> = {
+          'New': ['Open', 'Cancelled'],
+          'Open': ['In Progress', 'Waiting for Requester'],
+          'Waiting for Requester': ['In Progress', 'Open'],
+          'In Progress': ['Resolved', 'Waiting for Requester'],
+          'Resolved': ['Closed'],
+          'Closed': ['Reopened'],
+          'Reopened': ['In Progress', 'Open', 'Waiting for Requester'],
+          'Cancelled': []
+        };
+
+        if (!validTransitions[ticket.status]?.includes(status)) {
+          const err = new Error(`Invalid status transition from '${ticket.status}' to '${status}'.`);
+          (err as any).status = 400;
+          throw err;
+        }
+
+        const ownerRequiredTransitions = new Set(['New->Open', 'Open->In Progress', 'Reopened->In Progress']);
+        const transitionKey = `${ticket.status}->${status}`;
+        if (ownerRequiredTransitions.has(transitionKey) && !ticket.ownerId) {
+          const err = new Error(`Ticket must be assigned to an owner before transitioning from '${ticket.status}' to '${status}'.`);
+          (err as any).status = 400;
+          throw err;
+        }
+
+        if (status === 'Resolved') {
+          const actionCount = await tx.actionTaken.count({ where: { ticketId } });
+          if (actionCount === 0) {
+            const err = new Error("At least one action taken must be recorded before resolving the ticket.");
+            (err as any).status = 400;
+            throw err;
+          }
+        }
+
+        if (status === 'Cancelled') {
+          if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+            const err = new Error("Cancellation reason is required.");
+            (err as any).status = 400;
+            throw err;
+          }
+        }
+
+        if (status === 'Reopened') {
+          if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+            const err = new Error("Reopened reason is required.");
+            (err as any).status = 400;
+            throw err;
+          }
+        }
+
+        if (status === 'Waiting for Requester') {
+          if (!comment || typeof comment !== 'string' || comment.trim() === '') {
+            const err = new Error("Public comment is required when placing ticket in Waiting for Requester.");
+            (err as any).status = 400;
+            throw err;
+          }
+        }
+      }
+
+      const now = new Date();
+      const updateData: any = {
+        updatedAt: now
+      };
+      if (status) {
+        updateData.status = status;
+        if (status === 'Resolved') {
+          updateData.resolvedAt = now;
+        } else if (status === 'Reopened') {
+          updateData.resolvedAt = null;
+        }
+      }
+      if (itPriority) {
+        updateData.itPriority = itPriority;
+      }
+
+      const updateResult = await tx.ticket.updateMany({
+        where: {
+          id: ticketId,
+          status: ticket.status,
+          updatedAt: parsedLastUpdatedAt
+        },
         data: updateData
-      }));
-    }
+      });
 
-    if (status === 'Cancelled' && ticket.status === 'New' && reason) {
-      transactionOps.push(getPrisma().internalNote.create({
-        data: {
-          content: `Cancellation Reason: ${reason}`,
-          ticketId: ticketId,
-          authorId: user.id
+      if (updateResult.count === 0) {
+        const current = await tx.ticket.findUnique({ where: { id: ticketId } });
+        if (!current) {
+          const err = new Error("Ticket not found");
+          (err as any).status = 404;
+          throw err;
         }
-      }));
-    }
-
-    if (status === 'Waiting for Requester' && ['Open', 'In Progress'].includes(ticket.status) && comment) {
-      transactionOps.push(getPrisma().publicComment.create({
-        data: {
-          content: comment,
-          ticketId: ticketId,
-          authorId: user.id
-        }
-      }));
-    }
-
-    if (status === 'Resolved' && ticket.status === 'In Progress' && comment) {
-      transactionOps.push(getPrisma().publicComment.create({
-        data: {
-          content: comment,
-          ticketId: ticketId,
-          authorId: user.id
-        }
-      }));
-    }
-
-    let updatedTicket = ticket;
-    if (transactionOps.length > 0) {
-      const results = await getPrisma().$transaction(transactionOps);
-      // The first operation is the ticket update
-      if (Object.keys(updateData).length > 0) {
-        const firstResult = results[0];
-        if (firstResult && 'summary' in firstResult) {
-          updatedTicket = firstResult;
-        }
+        const err = new Error("Ticket was modified by another session. Please reload and try again.");
+        (err as any).status = 409;
+        throw err;
       }
-    }
+
+      if (status === 'Resolved' && comment && typeof comment === 'string' && comment.trim() !== '') {
+        await tx.publicComment.create({
+          data: {
+            content: comment.trim(),
+            ticketId,
+            authorId: user.id
+          }
+        });
+      }
+
+      if (status === 'Waiting for Requester' && comment && typeof comment === 'string' && comment.trim() !== '') {
+        await tx.publicComment.create({
+          data: {
+            content: comment.trim(),
+            ticketId,
+            authorId: user.id
+          }
+        });
+      }
+
+      if (status === 'Cancelled' && reason && typeof reason === 'string' && reason.trim() !== '') {
+        await tx.internalNote.create({
+          data: {
+            content: `Cancellation Reason: ${reason.trim()}`,
+            ticketId,
+            authorId: user.id
+          }
+        });
+      }
+
+      if (status === 'Reopened' && reason && typeof reason === 'string' && reason.trim() !== '') {
+        await tx.internalNote.create({
+          data: {
+            content: `Reopened Reason: ${reason.trim()}`,
+            ticketId,
+            authorId: user.id
+          }
+        });
+      }
+
+      const updated = await tx.ticket.findUnique({
+        where: { id: ticketId },
+        include: {
+          category: true,
+          relatedSystem: true,
+          requester: { select: { id: true, name: true, email: true, role: true } },
+          owner: { select: { id: true, name: true, email: true, role: true } },
+          attachments: true
+        }
+      });
+
+      return {
+        ...updated,
+        ticketNumber: `TKT-${String(updated!.id).padStart(3, '0')}`
+      };
+    });
 
     return res.status(200).json(updatedTicket);
-  } catch (err) {
+  } catch (err: any) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     console.error("Error updating ticket status:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -461,37 +619,340 @@ app.get("/api/staff/users", requireAuth, async (req: Request, res: Response): Pr
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+// ===========================================================================
+// Operational Dashboard Endpoints (Issue 6)
+// ===========================================================================
+
+// GET /api/dashboard/requester
+app.get("/api/dashboard/requester", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Requester dashboard is available only to Requesters" });
+    }
+
+    const prisma = getPrisma();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      openTickets,
+      waitingForRequester,
+      inProgress,
+      resolved,
+      closed,
+      recentlyUpdated,
+      recentlyResolved
+    ] = await Promise.all([
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: { in: ['New', 'Open', 'In Progress', 'Waiting for Requester', 'Reopened'] }
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Waiting for Requester'
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'In Progress'
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Resolved',
+          resolvedAt: { not: null, gte: thirtyDaysAgo }
+        }
+      }),
+      prisma.ticket.count({
+        where: {
+          requesterId: user.id,
+          status: 'Closed'
+        }
+      }),
+      prisma.ticket.findMany({
+        where: { requesterId: user.id },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 5,
+        select: {
+          id: true,
+          summary: true,
+          status: true,
+          priority: true,
+          itPriority: true,
+          updatedAt: true,
+          createdAt: true
+        }
+      }),
+      prisma.ticket.findMany({
+        where: {
+          requesterId: user.id,
+          status: 'Resolved',
+          resolvedAt: { not: null, gte: thirtyDaysAgo }
+        },
+        orderBy: [{ resolvedAt: 'desc' }, { id: 'desc' }],
+        take: 5,
+        select: {
+          id: true,
+          summary: true,
+          status: true,
+          priority: true,
+          itPriority: true,
+          resolvedAt: true,
+          updatedAt: true,
+          createdAt: true
+        }
+      })
+    ]);
+
+    const recentlyUpdatedTickets = recentlyUpdated.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    const recentlyResolvedTickets = recentlyResolved.map(t => ({
+      ...t,
+      ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`
+    }));
+
+    return res.status(200).json({
+      metrics: {
+        openTickets,
+        waitingForRequester,
+        inProgress,
+        resolved,
+        closed
+      },
+      recentlyUpdatedTickets,
+      recentlyResolvedTickets
+    });
+  } catch (err) {
+    console.error("Error fetching requester dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+async function fetchStaffTriageData(staffUserId: number) {
+  const prisma = getPrisma();
+  const activeStatusFilter = { notIn: ['Resolved', 'Closed', 'Cancelled'] };
+
+  const [
+    unassigned,
+    myAssigned,
+    newTickets,
+    openTickets,
+    inProgressTickets,
+    waitingForRequesterTickets,
+    priorityGroups,
+    recentTicketsData
+  ] = await Promise.all([
+    prisma.ticket.count({
+      where: {
+        ownerId: null,
+        status: activeStatusFilter
+      }
+    }),
+    prisma.ticket.count({
+      where: {
+        ownerId: staffUserId,
+        status: activeStatusFilter
+      }
+    }),
+    prisma.ticket.count({
+      where: { status: 'New' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'Open' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'In Progress' }
+    }),
+    prisma.ticket.count({
+      where: { status: 'Waiting for Requester' }
+    }),
+    prisma.ticket.groupBy({
+      by: ['itPriority'],
+      where: { status: activeStatusFilter },
+      _count: { id: true }
+    }),
+    prisma.ticket.findMany({
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        summary: true,
+        status: true,
+        priority: true,
+        itPriority: true,
+        updatedAt: true,
+        owner: { select: { id: true, name: true } },
+        requester: { select: { id: true, name: true } }
+      }
+    })
+  ]);
+
+  const priorityBreakdown = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0
+  };
+
+  for (const group of priorityGroups) {
+    const p = (group.itPriority || '').toLowerCase();
+    if (p in priorityBreakdown) {
+      (priorityBreakdown as any)[p] = group._count.id;
+    }
+  }
+
+  const recentTickets = recentTicketsData.map(t => ({
+    id: t.id,
+    ticketNumber: `TKT-${String(t.id).padStart(3, '0')}`,
+    summary: t.summary,
+    status: t.status,
+    priority: t.priority,
+    itPriority: t.itPriority,
+    owner: t.owner,
+    requester: t.requester,
+    updatedAt: t.updatedAt
+  }));
+
+  const metrics = {
+    unassigned,
+    myAssigned,
+    new: newTickets,
+    open: openTickets,
+    inProgress: inProgressTickets,
+    waitingForRequester: waitingForRequesterTickets
+  };
+
+  return { metrics, priorityBreakdown, recentTickets };
+}
+
+// GET /api/dashboard/staff
+app.get("/api/dashboard/staff", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role === 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Requesters cannot access Staff Dashboard" });
+    }
+
+    const { metrics, priorityBreakdown, recentTickets } = await fetchStaffTriageData(user.id);
+
+    return res.status(200).json({
+      metrics,
+      priorityBreakdown,
+      recentTickets
+    });
+  } catch (err) {
+    console.error("Error fetching staff dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/dashboard/admin
+app.get("/api/dashboard/admin", requireAuth, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Administrator') {
+      return res.status(403).json({ error: "Forbidden: Administrator dashboard is available only to Administrators" });
+    }
+
+    const prisma = getPrisma();
+
+    const [
+      staffData,
+      totalUsers,
+      activeRequesters,
+      activeStaff,
+      activeAdmins,
+      inactiveUsers
+    ] = await Promise.all([
+      fetchStaffTriageData(user.id),
+      prisma.user.count(),
+      prisma.user.count({ where: { role: 'Requester', isActive: true } }),
+      prisma.user.count({ where: { role: 'IT Staff', isActive: true } }),
+      prisma.user.count({ where: { role: 'Administrator', isActive: true } }),
+      prisma.user.count({ where: { isActive: false } })
+    ]);
+
+    return res.status(200).json({
+      staffMetrics: staffData.metrics,
+      priorityBreakdown: staffData.priorityBreakdown,
+      userStats: {
+        totalUsers,
+        activeRequesters,
+        activeStaff,
+        activeAdmins,
+        inactiveUsers
+      },
+      recentTickets: staffData.recentTickets
+    });
+  } catch (err) {
+    console.error("Error fetching admin dashboard:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 app.get("/api/tickets", requireAuth, async (req: Request, res: Response): Promise<any> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
+    if (user.role !== 'Requester') {
+      return res.status(403).json({ error: "Forbidden: Only Requesters can view this list" });
+    }
 
-    const { search, status, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
+    const { search, status, view, withinDays, sortBy = 'createdAt', sortOrder = 'desc', page = '1', limit = '10' } = req.query;
 
     const pageNum = parseInt(page as string, 10) || 1;
     const limitNum = parseInt(limit as string, 10) || 10;
     const skip = (pageNum - 1) * limitNum;
 
-    const whereClause: any = {};
-    if (user.role !== 'Requester') {
-      return res.status(403).json({ error: "Forbidden: Only Requesters can view this list" });
-    }
-    whereClause.requesterId = user.id;
+    const andConditions: any[] = [{ requesterId: user.id }];
 
-    if (status && status !== 'All') {
-      whereClause.status = status;
+    if (view !== undefined) {
+      if (view !== 'open') {
+        return res.status(400).json({ error: "Invalid view parameter. Supported value: 'open'." });
+      }
+      andConditions.push({ status: { in: ['New', 'Open', 'In Progress', 'Waiting for Requester', 'Reopened'] } });
+    }
+
+    const VALID_STATUSES = ['All', 'New', 'Open', 'In Progress', 'Waiting for Requester', 'Resolved', 'Closed', 'Reopened', 'Cancelled'];
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: "Invalid status parameter." });
+      }
+      if (status !== 'All') {
+        andConditions.push({ status });
+      }
+    }
+
+    if (withinDays !== undefined) {
+      const daysNum = Number(withinDays);
+      if (!Number.isInteger(daysNum) || daysNum <= 0) {
+        return res.status(400).json({ error: "withinDays must be a positive integer." });
+      }
+      if (status === 'Resolved') {
+        const daysAgo = new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
+        andConditions.push({ resolvedAt: { not: null, gte: daysAgo } });
+      }
     }
 
     if (search) {
       const searchStr = String(search).trim();
-      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i);
+      const searchIdMatch = searchStr.match(/^TKT-0*(\d+)$/i) || searchStr.match(/^(\d+)$/);
 
       if (searchIdMatch) {
-         whereClause.id = parseInt(searchIdMatch[1], 10);
+         andConditions.push({ id: parseInt(searchIdMatch[1], 10) });
       } else {
-         whereClause.summary = { contains: searchStr, mode: 'insensitive' };
+         andConditions.push({ summary: { contains: searchStr, mode: 'insensitive' } });
       }
     }
+
+    const whereClause: any = { AND: andConditions };
 
     const validSortFields = ['createdAt', 'priority', 'status'];
     const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : 'createdAt';
@@ -601,7 +1062,7 @@ app.get("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedReque
 });
 
 // POST /api/tickets/:id/comments
-app.post("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
   try {
     if (req.user!.role === 'Administrator') {
       return res.status(403).json({ error: "Administrators cannot post comments" });
@@ -610,56 +1071,230 @@ app.post("/api/tickets/:id/comments", requireAuth, async (req: AuthenticatedRequ
     const ticketId = parseInt(req.params.id, 10);
     if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
 
-    const { content } = req.body;
-    if (!content || typeof content !== 'string' || content.trim() === '') {
-      return res.status(400).json({ error: "Content is required" });
+    const { content, lastUpdatedAt } = req.body;
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      return res.status(400).json({ error: "content is required and cannot be empty or whitespace-only." });
     }
     if (content.length > 2000) {
       return res.status(400).json({ error: "Content must not exceed 2000 characters" });
     }
+    const normalizedContent = content.trim();
 
-    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
-    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-
-    if (req.user!.role === 'Requester' && ticket.requesterId !== req.user!.id) {
-      return res.status(404).json({ error: "Ticket not found" });
+    if (!lastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
-    // Determine if auto-transition is needed
-    let newStatus = ticket.status;
-    if (req.user!.role === 'Requester') {
-      if (ticket.status === 'Waiting for Requester') newStatus = 'Open';
-      else if (ticket.status === 'Resolved' || ticket.status === 'Closed') newStatus = 'Reopened';
+    const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+    if (!parsedLastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
-    const comment = await getPrisma().$transaction(async (tx) => {
-      const created = await tx.publicComment.create({
+    const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
+    if (idempotencyKey !== undefined && idempotencyKey !== '') {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+        return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
+      }
+    }
+
+    let requestHash = '';
+    if (idempotencyKey) {
+      const canonicalPayload = {
+        content: normalizedContent,
+        lastUpdatedAt: parsedLastUpdatedAt.toISOString()
+      };
+      requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+
+      const existingKey = await getPrisma().idempotencyKey.findUnique({
+        where: {
+          route_ticketId_userId_key: {
+            route: "POST /api/tickets/:id/comments",
+            ticketId,
+            userId: req.user!.id,
+            key: idempotencyKey
+          }
+        }
+      });
+      if (existingKey) {
+        if (existingKey.expiresAt > new Date()) {
+          if (existingKey.statusCode !== null && existingKey.responseBody !== null) {
+            if (existingKey.requestHash === requestHash) {
+              res.setHeader('Idempotency-Replayed', 'true');
+              return res.status(existingKey.statusCode).json(JSON.parse(existingKey.responseBody));
+            }
+            return res.status(409).json({ error: "Idempotency key reused with different request payload" });
+          }
+        } else {
+          await getPrisma().idempotencyKey.deleteMany({
+            where: { id: existingKey.id, expiresAt: { lte: new Date() } }
+          });
+        }
+      }
+    }
+
+    const result = await getPrisma().$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id: ticketId } });
+      if (!ticket) {
+        const err = new Error("Ticket not found");
+        (err as any).status = 404;
+        throw err;
+      }
+      if (req.user!.role === 'Requester' && ticket.requesterId !== req.user!.id) {
+        const err = new Error("Ticket not found");
+        (err as any).status = 404;
+        throw err;
+      }
+
+      let reservationId: number | null = null;
+      if (idempotencyKey) {
+        const reservation = await tx.idempotencyKey.create({
+          data: {
+            key: idempotencyKey,
+            route: "POST /api/tickets/:id/comments",
+            ticketId,
+            userId: req.user!.id,
+            requestHash,
+            statusCode: null,
+            responseBody: null,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+          }
+        });
+        reservationId = reservation.id;
+      }
+
+      let updateCount = 0;
+      const now = new Date();
+      if (req.user!.role === 'Requester') {
+        if (ticket.status === 'Waiting for Requester') {
+          const res = await tx.ticket.updateMany({
+            where: {
+              id: ticketId,
+              status: 'Waiting for Requester',
+              updatedAt: parsedLastUpdatedAt
+            },
+            data: { status: 'Open', updatedAt: now }
+          });
+          updateCount = res.count;
+        } else if (['Resolved', 'Closed'].includes(ticket.status)) {
+          const res = await tx.ticket.updateMany({
+            where: {
+              id: ticketId,
+              status: ticket.status,
+              updatedAt: parsedLastUpdatedAt
+            },
+            data: { status: 'Reopened', resolvedAt: null, updatedAt: now }
+          });
+          updateCount = res.count;
+        } else {
+          const res = await tx.ticket.updateMany({
+            where: {
+              id: ticketId,
+              status: ticket.status,
+              updatedAt: parsedLastUpdatedAt
+            },
+            data: { updatedAt: now }
+          });
+          updateCount = res.count;
+        }
+      } else {
+        const res = await tx.ticket.updateMany({
+          where: {
+            id: ticketId,
+            status: ticket.status,
+            updatedAt: parsedLastUpdatedAt
+          },
+          data: { updatedAt: now }
+        });
+        updateCount = res.count;
+      }
+
+      if (updateCount === 0) {
+        const currentTicket = await tx.ticket.findUnique({ where: { id: ticketId } });
+        if (!currentTicket || (req.user!.role === 'Requester' && currentTicket.requesterId !== req.user!.id)) {
+          const err = new Error("Ticket not found");
+          (err as any).status = 404;
+          throw err;
+        }
+        const err = new Error("Ticket was modified by another session. Please reload and try again.");
+        (err as any).status = 409;
+        throw err;
+      }
+
+      const comment = await tx.publicComment.create({
         data: {
-          content: content.trim(),
+          content: normalizedContent,
           ticketId,
           authorId: req.user!.id
         },
         include: { author: { select: { id: true, name: true, role: true } } }
       });
 
-      if (newStatus !== ticket.status) {
-        await tx.ticket.update({
-          where: { id: ticketId },
-          data: { status: newStatus }
+      if (reservationId) {
+        await tx.idempotencyKey.update({
+          where: { id: reservationId },
+          data: {
+            statusCode: 201,
+            responseBody: JSON.stringify(comment)
+          }
         });
       }
-      return created;
+
+      return comment;
     });
 
-    return res.status(201).json(comment);
-  } catch (err) {
-    console.error(err);
+    return res.status(201).json(result);
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
+      if (isIdempotencyKeyP2002(err) && idempotencyKey) {
+        const ticketId = parseInt(req.params.id, 10);
+        const existing = await getPrisma().idempotencyKey.findUnique({
+          where: {
+            route_ticketId_userId_key: {
+              route: "POST /api/tickets/:id/comments",
+              ticketId,
+              userId: req.user!.id,
+              key: idempotencyKey
+            }
+          }
+        });
+
+        if (!existing || existing.statusCode === null || existing.responseBody === null) {
+          console.error("Invariant violation: Committed IdempotencyKey record is missing finalized response data", {
+            key: idempotencyKey,
+            route: "POST /api/tickets/:id/comments",
+            ticketId,
+            userId: req.user!.id
+          });
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        if (existing.expiresAt > new Date()) {
+          const canonicalPayload = {
+            content: typeof req.body.content === 'string' ? req.body.content.trim() : req.body.content,
+            lastUpdatedAt: parseStrictIsoTimestamp(req.body.lastUpdatedAt)?.toISOString()
+          };
+          const requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+
+          if (existing.requestHash === requestHash) {
+            res.setHeader("Idempotency-Replayed", "true");
+            return res.status(existing.statusCode).json(JSON.parse(existing.responseBody));
+          }
+          return res.status(409).json({ error: "Idempotency key reused with different request payload" });
+        }
+      }
+      // Any unrelated P2002 error must be rethrown immediately
+      throw err;
+    }
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error("Error creating comment:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // POST /api/tickets/:id/appears-resolved
-app.post("/api/tickets/:id/appears-resolved", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/tickets/:id/appears-resolved", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
   try {
     if (req.user!.role !== 'Requester') {
       return res.status(403).json({ error: "Only Requesters can use this endpoint" });
@@ -668,27 +1303,178 @@ app.post("/api/tickets/:id/appears-resolved", requireAuth, async (req: Authentic
     const ticketId = parseInt(req.params.id, 10);
     if (isNaN(ticketId)) return res.status(400).json({ error: "Invalid ticket ID" });
 
-    const ticket = await getPrisma().ticket.findUnique({ where: { id: ticketId } });
-    if (!ticket || ticket.requesterId !== req.user!.id) {
-      return res.status(404).json({ error: "Ticket not found" });
+    const { lastUpdatedAt } = req.body;
+    if (!lastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
-    if (ticket.status !== 'In Progress') {
-      return res.status(400).json({ error: "Ticket must be In Progress to use appears-resolved" });
+    const parsedLastUpdatedAt = parseStrictIsoTimestamp(lastUpdatedAt);
+    if (!parsedLastUpdatedAt) {
+      return res.status(400).json({ error: "lastUpdatedAt is required and must be a valid strict ISO 8601 timestamp." });
     }
 
-    const comment = await getPrisma().publicComment.create({
-      data: {
-        content: "The requester has indicated that the problem appears resolved.",
-        ticketId,
-        authorId: req.user!.id
-      },
-      include: { author: { select: { id: true, name: true, role: true } } }
+    const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
+    if (idempotencyKey !== undefined && idempotencyKey !== '') {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+        return res.status(400).json({ error: "Invalid Idempotency-Key header format. Must be UUIDv4." });
+      }
+    }
+
+    let requestHash = '';
+    if (idempotencyKey) {
+      const canonicalPayload = {
+        lastUpdatedAt: parsedLastUpdatedAt.toISOString()
+      };
+      requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+
+      const existingKey = await getPrisma().idempotencyKey.findUnique({
+        where: {
+          route_ticketId_userId_key: {
+            route: "POST /api/tickets/:id/appears-resolved",
+            ticketId,
+            userId: req.user!.id,
+            key: idempotencyKey
+          }
+        }
+      });
+      if (existingKey) {
+        if (existingKey.expiresAt > new Date()) {
+          if (existingKey.statusCode !== null && existingKey.responseBody !== null) {
+            if (existingKey.requestHash === requestHash) {
+              res.setHeader('Idempotency-Replayed', 'true');
+              return res.status(existingKey.statusCode).json(JSON.parse(existingKey.responseBody));
+            }
+            return res.status(409).json({ error: "Idempotency key reused with different request payload" });
+          }
+        } else {
+          await getPrisma().idempotencyKey.deleteMany({
+            where: { id: existingKey.id, expiresAt: { lte: new Date() } }
+          });
+        }
+      }
+    }
+
+    const result = await getPrisma().$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({ where: { id: ticketId } });
+      if (!ticket || ticket.requesterId !== req.user!.id) {
+        const err = new Error("Ticket not found");
+        (err as any).status = 404;
+        throw err;
+      }
+
+      let reservationId: number | null = null;
+      if (idempotencyKey) {
+        const reservation = await tx.idempotencyKey.create({
+          data: {
+            key: idempotencyKey,
+            route: "POST /api/tickets/:id/appears-resolved",
+            ticketId,
+            userId: req.user!.id,
+            requestHash,
+            statusCode: null,
+            responseBody: null,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+          }
+        });
+        reservationId = reservation.id;
+      }
+
+      if (ticket.status !== 'In Progress') {
+        const err = new Error("Advisory resolution feedback is permitted only when ticket is In Progress.");
+        (err as any).status = 400;
+        throw err;
+      }
+
+      const updateResult = await tx.ticket.updateMany({
+        where: {
+          id: ticketId,
+          status: 'In Progress',
+          updatedAt: parsedLastUpdatedAt
+        },
+        data: { updatedAt: new Date() }
+      });
+
+      if (updateResult.count === 0) {
+        const currentTicket = await tx.ticket.findUnique({ where: { id: ticketId } });
+        if (!currentTicket || currentTicket.requesterId !== req.user!.id) {
+          const err = new Error("Ticket not found");
+          (err as any).status = 404;
+          throw err;
+        }
+        const err = new Error("Ticket was modified by another session. Advisory feedback requires the ticket to remain In Progress at the current revision.");
+        (err as any).status = 409;
+        throw err;
+      }
+
+      const comment = await tx.publicComment.create({
+        data: {
+          content: "The requester has indicated that the problem appears resolved.",
+          ticketId,
+          authorId: req.user!.id
+        },
+        include: { author: { select: { id: true, name: true, role: true } } }
+      });
+
+      if (reservationId) {
+        await tx.idempotencyKey.update({
+          where: { id: reservationId },
+          data: {
+            statusCode: 201,
+            responseBody: JSON.stringify(comment)
+          }
+        });
+      }
+
+      return comment;
     });
 
-    return res.status(201).json(comment);
-  } catch (err) {
-    console.error(err);
+    return res.status(201).json(result);
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
+      if (isIdempotencyKeyP2002(err) && idempotencyKey) {
+        const ticketId = parseInt(req.params.id, 10);
+        const existing = await getPrisma().idempotencyKey.findUnique({
+          where: {
+            route_ticketId_userId_key: {
+              route: "POST /api/tickets/:id/appears-resolved",
+              ticketId,
+              userId: req.user!.id,
+              key: idempotencyKey
+            }
+          }
+        });
+
+        if (!existing || existing.statusCode === null || existing.responseBody === null) {
+          console.error("Invariant violation: Committed IdempotencyKey record is missing finalized response data", {
+            key: idempotencyKey,
+            route: "POST /api/tickets/:id/appears-resolved",
+            ticketId,
+            userId: req.user!.id
+          });
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        if (existing.expiresAt > new Date()) {
+          const canonicalPayload = {
+            lastUpdatedAt: parseStrictIsoTimestamp(req.body.lastUpdatedAt)?.toISOString()
+          };
+          const requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
+
+          if (existing.requestHash === requestHash) {
+            res.setHeader("Idempotency-Replayed", "true");
+            return res.status(existing.statusCode).json(JSON.parse(existing.responseBody));
+          }
+          return res.status(409).json({ error: "Idempotency key reused with different request payload" });
+        }
+      }
+      // Any unrelated P2002 error must be rethrown immediately
+      throw err;
+    }
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error("Error submitting appears-resolved:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
